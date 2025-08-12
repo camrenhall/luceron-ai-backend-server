@@ -31,13 +31,13 @@ PORT = int(os.getenv("PORT", 8080))
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable is required")
+    logger.warning("OPENAI_API_KEY not set - OpenAI webhook processing will be limited")
 
 # Global connections
 db_pool = None
 openai_client = None
 
-# Models (Previous models remain the same)
+# Models
 class CaseData(BaseModel):
     case_id: str
     client_email: str
@@ -144,7 +144,6 @@ class BatchJobCompleteRequest(BaseModel):
 class PendingWorkflowsResponse(BaseModel):
     workflow_ids: List[str]
 
-# New Production Models
 class DocumentUploadResponse(BaseModel):
     document_id: str
     filename: str
@@ -191,14 +190,15 @@ async def init_connections():
             await conn.fetchval("SELECT 1")
         
         # OpenAI client
-        openai_client = httpx.AsyncClient(
-            base_url="https://api.openai.com/v1",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            timeout=30.0
-        )
+        if OPENAI_API_KEY:
+            openai_client = httpx.AsyncClient(
+                base_url="https://api.openai.com/v1",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30.0
+            )
         
         logger.info("Database and OpenAI connections initialized successfully")
         
@@ -220,6 +220,9 @@ async def close_connections():
 # OpenAI Integration Functions
 async def upload_file_to_openai(file_content: bytes, filename: str, purpose: str = "batch") -> str:
     """Upload file to OpenAI and return file ID"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+        
     try:
         # Create multipart form data
         files = {
@@ -248,9 +251,12 @@ async def upload_file_to_openai(file_content: bytes, filename: str, purpose: str
 
 async def create_batch_analysis(requests: List[Dict[str, Any]]) -> str:
     """Create batch analysis job with OpenAI"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+        
     try:
         payload = {
-            "endpoint": "/v1/responses",
+            "endpoint": "/v1/chat/completions",
             "completion_window": "24h",
             "requests": requests
         }
@@ -270,6 +276,9 @@ async def create_batch_analysis(requests: List[Dict[str, Any]]) -> str:
 
 async def get_batch_status(batch_job_id: str) -> Dict[str, Any]:
     """Get batch job status from OpenAI"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+        
     try:
         response = await openai_client.get(f"/batches/{batch_job_id}")
         response.raise_for_status()
@@ -282,6 +291,9 @@ async def get_batch_status(batch_job_id: str) -> Dict[str, Any]:
 
 async def download_batch_results(output_file_id: str) -> Dict[str, Any]:
     """Download batch results from OpenAI"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+        
     try:
         response = await openai_client.get(f"/files/{output_file_id}/content")
         response.raise_for_status()
@@ -320,15 +332,21 @@ async def health_check():
         async with db_pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
         
-        # Test OpenAI connection
-        response = await openai_client.get("/models")
-        response.raise_for_status()
+        # Test OpenAI connection if configured
+        openai_status = "not_configured"
+        if OPENAI_API_KEY and openai_client:
+            try:
+                response = await openai_client.get("/models")
+                response.raise_for_status()
+                openai_status = "connected"
+            except:
+                openai_status = "error"
         
         return {
             "status": "healthy", 
             "timestamp": datetime.now().isoformat(),
             "database": "connected",
-            "openai": "connected"
+            "openai": openai_status
         }
     except Exception as e:
         return JSONResponse(
@@ -368,29 +386,36 @@ async def create_case(request: CaseCreateRequest):
         logger.error(f"Failed to create case: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@app.get("/api/cases/{case_id}", response_model=CaseData)
-async def get_case(case_id: str):
-    """Get case by ID"""
+@app.get("/api/cases/{case_id}")
+async def get_case_details(case_id: str):
+    """Get case details for analysis context"""
     try:
         async with db_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM cases WHERE case_id = $1", case_id
+            case_row = await conn.fetchrow(
+                "SELECT * FROM cases WHERE case_id = $1", 
+                case_id
             )
             
-            if not row:
+            if not case_row:
                 raise HTTPException(status_code=404, detail="Case not found")
             
-            return CaseData(
-                case_id=row['case_id'],
-                client_email=row['client_email'],
-                client_name=row['client_name'],
-                status=row['status'],
-                last_communication_date=row['last_communication_date'],
-                documents_requested=row['documents_requested']
-            )
+            case_details = {
+                "case_id": case_row['case_id'],
+                "client_name": case_row['client_name'],
+                "client_email": case_row['client_email'],
+                "status": case_row['status'],
+                "documents_requested": case_row['documents_requested'],
+                "case_type": "family_law_financial_discovery",
+                "priority": "standard",
+                "focus_areas": ["asset_identification", "income_verification", "expense_analysis"],
+                "created_at": case_row['created_at'].isoformat(),
+                "last_communication_date": case_row['last_communication_date'].isoformat() if case_row['last_communication_date'] else None
+            }
+            
+            return case_details
             
     except Exception as e:
-        logger.error(f"Failed to get case: {e}")
+        logger.error(f"Failed to get case details: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @app.get("/api/cases/pending-reminders", response_model=PendingCasesResponse)
@@ -442,12 +467,14 @@ async def upload_document(
         # Read file content
         file_content = await file.read()
         
-        # Upload to OpenAI
-        openai_file_id = await upload_file_to_openai(
-            file_content, 
-            file.filename,
-            purpose="batch"
-        )
+        # Upload to OpenAI if configured
+        openai_file_id = None
+        if OPENAI_API_KEY:
+            openai_file_id = await upload_file_to_openai(
+                file_content, 
+                file.filename,
+                purpose="batch"
+            )
         
         # Store document metadata in database
         document_id = f"doc_{uuid.uuid4().hex[:12]}"
@@ -467,7 +494,7 @@ async def upload_document(
             document_id=document_id,
             filename=file.filename,
             file_size=len(file_content),
-            openai_file_id=openai_file_id,
+            openai_file_id=openai_file_id or "not_configured",
             status="uploaded"
         )
         
@@ -509,6 +536,268 @@ async def get_case_documents(case_id: str):
         logger.error(f"Failed to get case documents: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+# Workflow Management Endpoints
+@app.post("/api/workflows", response_model=WorkflowState)
+async def create_workflow(request: CreateWorkflowRequest):
+    """Create a new workflow"""
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO workflow_states 
+                (workflow_id, agent_type, case_id, status, initial_prompt, reasoning_chain, 
+                 scheduled_for, task_graph, batch_job_ids, analysis_results, document_ids, 
+                 case_context, priority, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            """,
+            request.workflow_id, request.agent_type, request.case_id, request.status.value,
+            request.initial_prompt, json.dumps([]), request.scheduled_for, json.dumps({}),
+            json.dumps([]), json.dumps({}), json.dumps(request.document_ids or []),
+            request.case_context, request.priority, datetime.now(), datetime.now())
+            
+            return WorkflowState(
+                workflow_id=request.workflow_id,
+                agent_type=request.agent_type,
+                case_id=request.case_id,
+                status=request.status,
+                initial_prompt=request.initial_prompt,
+                reasoning_chain=[],
+                scheduled_for=request.scheduled_for,
+                task_graph=None,
+                batch_job_ids=[],
+                analysis_results={},
+                document_ids=request.document_ids or [],
+                case_context=request.case_context,
+                priority=request.priority,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
+            
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(status_code=409, detail="Workflow ID already exists")
+    except Exception as e:
+        logger.error(f"Failed to create workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/workflows/{workflow_id}", response_model=WorkflowState)
+async def get_workflow(workflow_id: str):
+    """Get workflow by ID"""
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM workflow_states WHERE workflow_id = $1", workflow_id
+            )
+            
+            if not row:
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            # Parse JSON fields
+            reasoning_chain = json.loads(row['reasoning_chain']) if row['reasoning_chain'] else []
+            task_graph = json.loads(row['task_graph']) if row['task_graph'] else None
+            batch_job_ids = json.loads(row['batch_job_ids']) if row['batch_job_ids'] else []
+            analysis_results = json.loads(row['analysis_results']) if row['analysis_results'] else {}
+            document_ids = json.loads(row['document_ids']) if row['document_ids'] else []
+            
+            return WorkflowState(
+                workflow_id=row['workflow_id'],
+                agent_type=row['agent_type'],
+                case_id=row['case_id'],
+                status=WorkflowStatus(row['status']),
+                initial_prompt=row['initial_prompt'],
+                reasoning_chain=[ReasoningStep(**step) for step in reasoning_chain],
+                scheduled_for=row['scheduled_for'],
+                task_graph=TaskGraph(**task_graph) if task_graph else None,
+                batch_job_ids=batch_job_ids,
+                analysis_results=analysis_results,
+                document_ids=document_ids,
+                case_context=row['case_context'],
+                priority=row['priority'],
+                created_at=row['created_at'],
+                updated_at=row['updated_at']
+            )
+            
+    except Exception as e:
+        logger.error(f"Failed to get workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.put("/api/workflows/{workflow_id}/status")
+async def update_workflow_status(workflow_id: str, request: UpdateWorkflowStatusRequest):
+    """Update workflow status"""
+    try:
+        async with db_pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE workflow_states SET status = $1, updated_at = $2 WHERE workflow_id = $3",
+                request.status.value, datetime.now(), workflow_id
+            )
+            
+            if result == "UPDATE 0":
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            logger.info(f"Updated workflow {workflow_id} status to {request.status}")
+            return {"status": "updated", "workflow_id": workflow_id}
+            
+    except Exception as e:
+        logger.error(f"Failed to update workflow status: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.post("/api/workflows/{workflow_id}/reasoning-step")
+async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
+    """Add a reasoning step to workflow"""
+    try:
+        async with db_pool.acquire() as conn:
+            # Get current reasoning chain
+            current_chain = await conn.fetchval(
+                "SELECT reasoning_chain FROM workflow_states WHERE workflow_id = $1",
+                workflow_id
+            )
+            
+            if current_chain is None:
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            # Parse and append new step
+            chain = json.loads(current_chain) if current_chain else []
+            chain.append(step.dict())
+            
+            # Update database
+            await conn.execute(
+                "UPDATE workflow_states SET reasoning_chain = $1, updated_at = $2 WHERE workflow_id = $3",
+                json.dumps(chain), datetime.now(), workflow_id
+            )
+            
+            return {"status": "step_added", "workflow_id": workflow_id, "step_count": len(chain)}
+            
+    except Exception as e:
+        logger.error(f"Failed to add reasoning step: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/workflows/pending", response_model=PendingWorkflowsResponse)
+async def get_pending_workflows():
+    """Get workflows that need processing"""
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT workflow_id FROM workflow_states 
+                WHERE status IN ('PENDING', 'PENDING_PLANNING', 'SYNTHESIZING_RESULTS')
+                OR (status = 'AWAITING_SCHEDULE' AND scheduled_for <= $1)
+                ORDER BY created_at ASC
+                LIMIT 50
+            """, datetime.now())
+            
+            workflow_ids = [row['workflow_id'] for row in rows]
+            
+            logger.info(f"Found {len(workflow_ids)} pending workflows")
+            return PendingWorkflowsResponse(workflow_ids=workflow_ids)
+            
+    except Exception as e:
+        logger.error(f"Failed to get pending workflows: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# NEW: OpenAI Webhook Endpoint
+@app.post("/api/webhooks/openai-batch-complete")
+async def openai_batch_complete(webhook_data: dict):
+    """Production webhook handler for OpenAI batch completion"""
+    try:
+        batch_id = webhook_data.get("batch_id")
+        status = webhook_data.get("status")
+        
+        if not batch_id:
+            raise HTTPException(status_code=400, detail="Missing batch_id")
+        
+        logger.info(f"📥 OpenAI batch webhook: {batch_id} - {status}")
+        
+        if not OPENAI_API_KEY:
+            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+        
+        # Retrieve batch details
+        batch = await get_batch_status(batch_id)
+        
+        # Process results if completed
+        results = {}
+        if batch["status"] == "completed" and batch.get("output_file_id"):
+            try:
+                # Download results file
+                output_results = await download_batch_results(batch["output_file_id"])
+                
+                results = {
+                    "batch_id": batch_id,
+                    "status": batch["status"],
+                    "analysis_results": output_results.get("results", []),
+                    "request_counts": batch.get("request_counts", {}),
+                    "completed_at": batch.get("completed_at")
+                }
+                
+            except Exception as e:
+                logger.error(f"Failed to process batch results: {e}")
+                results = {
+                    "batch_id": batch_id,
+                    "status": "error",
+                    "error": f"Failed to process results: {str(e)}"
+                }
+        
+        # Find and update workflows
+        async with db_pool.acquire() as conn:
+            # Find workflows with this batch job ID
+            workflows = await conn.fetch("""
+                SELECT workflow_id FROM workflow_states 
+                WHERE batch_job_ids::jsonb ? $1
+            """, batch_id)
+            
+            updated_workflows = []
+            for row in workflows:
+                workflow_id = row['workflow_id']
+                
+                # Update workflow with results
+                current_results = await conn.fetchval(
+                    "SELECT analysis_results FROM workflow_states WHERE workflow_id = $1",
+                    workflow_id
+                )
+                
+                if current_results:
+                    results_data = json.loads(current_results) if isinstance(current_results, str) else current_results
+                else:
+                    results_data = {}
+                
+                results_data[batch_id] = results
+                
+                # Update workflow status based on batch status
+                new_status = "SYNTHESIZING_RESULTS" if batch["status"] == "completed" else "FAILED"
+                
+                await conn.execute(
+                    """UPDATE workflow_states 
+                       SET analysis_results = $1, 
+                           status = CASE 
+                               WHEN status = 'AWAITING_BATCH_COMPLETION' THEN $2
+                               ELSE status 
+                           END,
+                           updated_at = $3
+                       WHERE workflow_id = $4""",
+                    json.dumps(results_data), new_status, datetime.now(), workflow_id
+                )
+                
+                updated_workflows.append(workflow_id)
+                logger.info(f"Updated workflow {workflow_id} with OpenAI batch results")
+        
+        return {
+            "status": "webhook_processed",
+            "batch_id": batch_id,
+            "batch_status": batch["status"],
+            "updated_workflows": updated_workflows
+        }
+        
+    except Exception as e:
+        logger.error(f"OpenAI webhook processing failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# NEW: Manual Batch Processing Endpoint
+@app.post("/api/openai/process-batch/{batch_id}")
+async def process_openai_batch_manually(batch_id: str):
+    """Manually process OpenAI batch results"""
+    try:
+        # Simulate webhook call
+        webhook_data = {"batch_id": batch_id, "status": "completed"}
+        return await openai_batch_complete(webhook_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Batch Analysis Endpoints
 @app.post("/api/analysis/batch", response_model=BatchAnalysisResponse)
 async def create_batch_analysis_job(request: BatchAnalysisRequest):
@@ -531,7 +820,7 @@ async def create_batch_analysis_job(request: BatchAnalysisRequest):
             batch_request = {
                 "custom_id": f"{request.case_id}_{doc['document_id']}",
                 "method": "POST",
-                "url": "/v1/responses",
+                "url": "/v1/chat/completions",
                 "body": {
                     "model": "gpt-4o",
                     "messages": [
@@ -719,8 +1008,86 @@ async def update_case_communication_date(case_id: str, request: UpdateCaseReques
         logger.error(f"Database update failed: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# All workflow management endpoints from previous implementation...
-# (Include all the workflow endpoints we built earlier)
+# Task Management Endpoints
+@app.put("/api/workflows/{workflow_id}/tasks/{task_id}")
+async def update_task_status(workflow_id: str, task_id: int, request: UpdateTaskStatusRequest):
+    """Update task status within workflow"""
+    try:
+        async with db_pool.acquire() as conn:
+            # Get current task graph
+            task_graph_json = await conn.fetchval(
+                "SELECT task_graph FROM workflow_states WHERE workflow_id = $1",
+                workflow_id
+            )
+            
+            if not task_graph_json:
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            task_graph = json.loads(task_graph_json) if task_graph_json else {"tasks": []}
+            
+            # Find and update task
+            task_found = False
+            for task in task_graph.get("tasks", []):
+                if task.get("task_id") == task_id:
+                    task["status"] = request.status
+                    if request.results:
+                        task["results"] = request.results
+                    if request.confidence_score:
+                        task["confidence_score"] = request.confidence_score
+                    task_found = True
+                    break
+            
+            if not task_found:
+                raise HTTPException(status_code=404, detail="Task not found")
+            
+            # Update database
+            await conn.execute(
+                "UPDATE workflow_states SET task_graph = $1, updated_at = $2 WHERE workflow_id = $3",
+                json.dumps(task_graph), datetime.now(), workflow_id
+            )
+            
+            logger.info(f"Updated task {task_id} in workflow {workflow_id}")
+            return {"status": "task_updated", "workflow_id": workflow_id, "task_id": task_id}
+            
+    except Exception as e:
+        logger.error(f"Failed to update task status: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.post("/api/workflows/{workflow_id}/batch-jobs")
+async def add_batch_job_to_workflow(workflow_id: str, batch_job_data: dict):
+    """Add batch job ID to workflow tracking"""
+    try:
+        batch_job_id = batch_job_data.get("batch_job_id")
+        if not batch_job_id:
+            raise HTTPException(status_code=400, detail="Missing batch_job_id")
+        
+        async with db_pool.acquire() as conn:
+            # Get current batch job IDs
+            current_jobs = await conn.fetchval(
+                "SELECT batch_job_ids FROM workflow_states WHERE workflow_id = $1",
+                workflow_id
+            )
+            
+            if current_jobs is None:
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            # Parse and append new batch job ID
+            batch_jobs = json.loads(current_jobs) if current_jobs else []
+            if batch_job_id not in batch_jobs:
+                batch_jobs.append(batch_job_id)
+            
+            # Update database
+            await conn.execute(
+                "UPDATE workflow_states SET batch_job_ids = $1, updated_at = $2 WHERE workflow_id = $3",
+                json.dumps(batch_jobs), datetime.now(), workflow_id
+            )
+            
+            logger.info(f"Added batch job {batch_job_id} to workflow {workflow_id}")
+            return {"status": "batch_job_added", "workflow_id": workflow_id, "batch_job_id": batch_job_id}
+            
+    except Exception as e:
+        logger.error(f"Failed to add batch job to workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Background task for processing completed batches
 async def process_completed_batches():
@@ -748,12 +1115,11 @@ async def process_completed_batches():
                         # Trigger webhook processing
                         webhook_data = {
                             "batch_job_id": batch_job_id,
-                            "status": "completed",
-                            "results": await download_batch_results(batch_status["output_file_id"])
+                            "status": "completed"
                         }
                         
                         # Process webhook (this would normally come from OpenAI)
-                        await batch_analysis_complete(BatchJobCompleteRequest(**webhook_data))
+                        await openai_batch_complete(webhook_data)
                         
                 except Exception as e:
                     logger.error(f"Failed to process batch {batch_job_id}: {e}")
@@ -766,6 +1132,43 @@ async def manual_batch_processing(background_tasks: BackgroundTasks):
     """Manually trigger batch processing check"""
     background_tasks.add_task(process_completed_batches)
     return {"status": "batch_processing_triggered"}
+
+# Health and status endpoints
+@app.get("/api/system/status")
+async def get_system_status():
+    """Get comprehensive system status"""
+    try:
+        async with db_pool.acquire() as conn:
+            # Get database stats
+            case_count = await conn.fetchval("SELECT COUNT(*) FROM cases")
+            workflow_count = await conn.fetchval("SELECT COUNT(*) FROM workflow_states")
+            pending_workflows = await conn.fetchval(
+                "SELECT COUNT(*) FROM workflow_states WHERE status IN ('PENDING', 'PENDING_PLANNING', 'AWAITING_BATCH_COMPLETION')"
+            )
+            
+            # Get document stats
+            document_count = await conn.fetchval("SELECT COUNT(*) FROM documents")
+            analyzing_docs = await conn.fetchval("SELECT COUNT(*) FROM documents WHERE status = 'analyzing'")
+            
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "database": "connected",
+            "openai": "connected" if OPENAI_API_KEY else "not_configured",
+            "stats": {
+                "total_cases": case_count,
+                "total_workflows": workflow_count,
+                "pending_workflows": pending_workflows,
+                "total_documents": document_count,
+                "analyzing_documents": analyzing_docs
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get system status: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"error": str(e), "timestamp": datetime.now().isoformat()}
+        )
 
 if __name__ == "__main__":
     import uvicorn
