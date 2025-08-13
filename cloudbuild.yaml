@@ -1,0 +1,11 @@
+steps:
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'gcloud'
+  args:
+  - 'run'
+  - 'deploy'
+  - 'luceron-ai-backend-server'  # ← Must match your actual service name
+  - '--source=.'
+  - '--region=europe-west1'
+  - '--platform=managed'
+  - '--allow-unauthenticated'
