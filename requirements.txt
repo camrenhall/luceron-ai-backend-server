@@ -1,6 +1,5 @@
 fastapi
 uvicorn[standard]
 asyncpg
-httpx
+resend
 pydantic
-python-multipart
