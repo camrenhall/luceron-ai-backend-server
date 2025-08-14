@@ -19,6 +19,8 @@ import asyncpg
 import resend
 import httpx
 
+from fastapi.middleware.cors import CORSMiddleware
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -235,9 +237,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Legal Communications Backend",
-    description="Backend API for case management and email communications",
+    description="Backend API for case management and email communications", 
     version="1.0.0",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://simple-s3-upload.onrender.com",  # frontend URL
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 @app.get("/")
