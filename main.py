@@ -599,6 +599,37 @@ async def get_case_analysis_summary(case_id: str):
     except Exception as e:
         logger.error(f"Failed to get case analysis summary: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+@app.get("/api/documents/{document_id}")
+async def get_document(document_id: str):
+    """Get document metadata by document ID"""
+    try:
+        async with db_pool.acquire() as conn:
+            doc_row = await conn.fetchrow("""
+                SELECT document_id, case_id, filename, file_size, file_type,
+                       s3_location, s3_key, s3_etag, document_type, status,
+                       uploaded_at, created_at, updated_at
+                FROM documents 
+                WHERE document_id = $1
+            """, document_id)
+            
+            if not doc_row:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            result = dict(doc_row)
+            
+            # Convert timestamps to ISO format
+            for field in ['uploaded_at', 'created_at', 'updated_at']:
+                if result[field]:
+                    result[field] = result[field].isoformat()
+            
+            return result
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get document: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Case Management
 @app.post("/api/cases")
