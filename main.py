@@ -173,8 +173,8 @@ def parse_uploaded_timestamp(timestamp_str: str) -> datetime:
         if timestamp_str.endswith('Z'):
             timestamp_str = timestamp_str.replace('Z', '+00:00')
         
-        # Parse the timestamp
-        uploaded_at = parse_uploaded_timestamp(file_upload.uploadedAt)
+        # Parse the timestamp - FIX: Parse timestamp_str, not recursive call
+        uploaded_at = datetime.fromisoformat(timestamp_str)
         
         # Convert to UTC and make timezone-naive for database storage
         if uploaded_at.tzinfo is not None:
@@ -332,10 +332,7 @@ async def handle_document_upload(request: S3UploadWebhookRequest, background_tas
                 document_type = classify_document_type(file_upload.fileName)
                 
                 # Parse uploaded timestamp
-                try:
-                    uploaded_at = datetime.fromisoformat(file_upload.uploadedAt.replace('Z', '+00:00'))
-                except:
-                    uploaded_at = datetime.utcnow()
+                uploaded_at = parse_uploaded_timestamp(file_upload.uploadedAt)
                 
                 # Insert document record
                 await conn.execute("""
