@@ -7,6 +7,7 @@ import os
 import logging
 import uuid
 import json
+
 from datetime import datetime, timedelta
 from typing import List, Optional
 from contextlib import asynccontextmanager
@@ -16,6 +17,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import asyncpg
 import resend
+import httpx
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +28,7 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "legal@blueprintsw.com")
+DOCUMENT_ANALYSIS_AGENT_URL = os.getenv("DOCUMENT_ANALYSIS_AGENT_URL", "http://localhost:8081")
 PORT = int(os.getenv("PORT", 8080))
 
 if not DATABASE_URL:
@@ -91,6 +95,50 @@ class WorkflowCreateRequest(BaseModel):
 
 class WorkflowStatusRequest(BaseModel):
     status: WorkflowStatus
+    
+class AnalysisResultRequest(BaseModel):
+    document_id: str
+    case_id: str
+    workflow_id: Optional[str] = None
+    analysis_content: str
+    extracted_data: Optional[dict] = None
+    confidence_score: Optional[int] = None
+    red_flags: Optional[List[str]] = None
+    recommendations: Optional[str] = None
+    model_used: str = "o3"
+    tokens_used: Optional[int] = None
+    analysis_cost_cents: Optional[int] = None
+    analysis_status: str = "completed"
+
+class AnalysisResultResponse(BaseModel):
+    analysis_id: str
+    document_id: str
+    case_id: str
+    status: str
+    analyzed_at: str
+
+class S3UploadFile(BaseModel):
+    fileName: str
+    fileSize: int
+    fileType: str
+    s3Location: str
+    s3Key: str
+    s3ETag: Optional[str] = None
+    uploadedAt: str
+    status: str = "success"
+
+class S3UploadWebhookRequest(BaseModel):
+    event: str
+    timestamp: str
+    summary: dict
+    files: List[S3UploadFile]
+    metadata: dict
+
+class DocumentUploadResponse(BaseModel):
+    documents_created: int
+    analysis_triggered: bool
+    workflow_ids: List[str]
+    message: str
 
 # Database initialization
 async def init_database():
@@ -207,6 +255,319 @@ async def health_check():
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Health check failed: {str(e)}")
+    
+@app.post("/api/webhooks/document-uploaded", response_model=DocumentUploadResponse)
+async def handle_document_upload(request: S3UploadWebhookRequest, background_tasks: BackgroundTasks):
+    """Handle S3 document upload webhook and trigger analysis"""
+    
+    logger.info(f"📄 Document upload webhook received: {request.event}")
+    logger.info(f"📄 Files uploaded: {len(request.files)}")
+    
+    documents_created = 0
+    workflow_ids = []
+    
+    try:
+        async with db_pool.acquire() as conn:
+            for file_upload in request.files:
+                if file_upload.status != "success":
+                    logger.warning(f"Skipping failed upload: {file_upload.fileName}")
+                    continue
+                
+                # Extract client email from metadata
+                client_email = request.metadata.get("clientEmail")
+                if not client_email:
+                    logger.error("No clientEmail in webhook metadata")
+                    continue
+                
+                # Find case by client email
+                case_row = await conn.fetchrow(
+                    "SELECT case_id FROM cases WHERE client_email = $1 AND status = 'awaiting_documents'",
+                    client_email
+                )
+                
+                if not case_row:
+                    logger.warning(f"No active case found for client email: {client_email}")
+                    continue
+                
+                case_id = case_row['case_id']
+                
+                # Generate document ID
+                document_id = f"doc_{uuid.uuid4().hex[:12]}"
+                
+                # Classify document type based on filename
+                document_type = classify_document_type(file_upload.fileName)
+                
+                # Parse uploaded timestamp
+                try:
+                    uploaded_at = datetime.fromisoformat(file_upload.uploadedAt.replace('Z', '+00:00'))
+                except:
+                    uploaded_at = datetime.now()
+                
+                # Insert document record
+                await conn.execute("""
+                    INSERT INTO documents 
+                    (document_id, case_id, filename, file_size, file_type, 
+                     s3_location, s3_key, s3_etag, document_type, status, uploaded_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                """,
+                document_id, case_id, file_upload.fileName, file_upload.fileSize,
+                file_upload.fileType, file_upload.s3Location, file_upload.s3Key,
+                file_upload.s3ETag, document_type, "uploaded", uploaded_at)
+                
+                documents_created += 1
+                
+                logger.info(f"📄 Created document record: {document_id} for case {case_id}")
+                
+                # Trigger document analysis in background
+                background_tasks.add_task(
+                    trigger_document_analysis,
+                    document_id,
+                    case_id,
+                    file_upload.s3Location
+                )
+                
+                # Generate workflow ID for tracking (will be created by analysis agent)
+                workflow_id = f"wf_upload_{uuid.uuid4().hex[:8]}"
+                workflow_ids.append(workflow_id)
+        
+        return DocumentUploadResponse(
+            documents_created=documents_created,
+            analysis_triggered=documents_created > 0,
+            workflow_ids=workflow_ids,
+            message=f"Successfully processed {documents_created} document uploads"
+        )
+        
+    except Exception as e:
+        logger.error(f"Document upload webhook failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
+
+def classify_document_type(filename: str) -> str:
+    """Classify document type based on filename patterns"""
+    filename_lower = filename.lower()
+    
+    if any(term in filename_lower for term in ['bank', 'statement', 'checking', 'savings']):
+        return 'bank_statement'
+    elif any(term in filename_lower for term in ['tax', '1040', 'w2', 'w-2']):
+        return 'tax_return'
+    elif any(term in filename_lower for term in ['pay', 'stub', 'payroll', 'salary']):
+        return 'pay_stub'
+    elif any(term in filename_lower for term in ['investment', 'brokerage', '401k', 'ira']):
+        return 'investment_statement'
+    elif any(term in filename_lower for term in ['financial', 'asset', 'liability']):
+        return 'financial_record'
+    else:
+        return 'other'
+
+async def trigger_document_analysis(document_id: str, case_id: str, s3_location: str):
+    """Background task to trigger document analysis agent"""
+    try:
+        logger.info(f"🔄 Triggering analysis for document {document_id}")
+        
+        # Update document status to analyzing
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE documents SET status = 'analyzing', updated_at = $1 WHERE document_id = $2",
+                datetime.now(), document_id
+            )
+        
+        # Call Document Analysis Agent
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            analysis_request = {
+                "case_id": case_id,
+                "document_ids": [document_id],
+                "analysis_priority": "immediate",
+                "case_context": f"Single document upload analysis for document {document_id}"
+            }
+            
+            response = await client.post(
+                f"{DOCUMENT_ANALYSIS_AGENT_URL}/workflows/trigger-analysis",
+                json=analysis_request
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                workflow_id = result.get("workflow_id")
+                logger.info(f"✅ Analysis triggered successfully: workflow {workflow_id}")
+            else:
+                logger.error(f"❌ Analysis trigger failed: {response.status_code} - {response.text}")
+                
+                # Update document status to failed
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE documents SET status = 'failed', updated_at = $1 WHERE document_id = $2",
+                        datetime.now(), document_id
+                    )
+                
+    except Exception as e:
+        logger.error(f"Background analysis trigger failed for {document_id}: {e}")
+        
+        # Update document status to failed
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE documents SET status = 'failed', updated_at = $1 WHERE document_id = $2",
+                    datetime.now(), document_id
+                )
+        except Exception as db_error:
+            logger.error(f"Failed to update document status: {db_error}")
+    
+@app.post("/api/documents/{document_id}/analysis", response_model=AnalysisResultResponse)
+async def store_document_analysis(document_id: str, request: AnalysisResultRequest):
+    """Store document analysis results"""
+    analysis_id = f"ana_{uuid.uuid4().hex[:12]}"
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Verify document exists
+            doc_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id = $1)", 
+                document_id
+            )
+            if not doc_exists:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            # Verify case exists
+            case_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
+                request.case_id
+            )
+            if not case_exists:
+                raise HTTPException(status_code=404, detail="Case not found")
+            
+            # Insert analysis result
+            await conn.execute("""
+                INSERT INTO document_analysis 
+                (analysis_id, document_id, case_id, workflow_id, analysis_content, 
+                 extracted_data, confidence_score, red_flags, recommendations,
+                 analysis_status, model_used, tokens_used, analysis_cost_cents, analyzed_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            """, 
+            analysis_id, document_id, request.case_id, request.workflow_id,
+            request.analysis_content, json.dumps(request.extracted_data) if request.extracted_data else None,
+            request.confidence_score, json.dumps(request.red_flags) if request.red_flags else None,
+            request.recommendations, request.analysis_status, request.model_used,
+            request.tokens_used, request.analysis_cost_cents, datetime.now())
+            
+            # Update document status to analyzed
+            await conn.execute(
+                "UPDATE documents SET status = 'analyzed', updated_at = $1 WHERE document_id = $2",
+                datetime.now(), document_id
+            )
+            
+            logger.info(f"Stored analysis result {analysis_id} for document {document_id}")
+            
+            return AnalysisResultResponse(
+                analysis_id=analysis_id,
+                document_id=document_id,
+                case_id=request.case_id,
+                status="stored",
+                analyzed_at=datetime.now().isoformat()
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to store analysis result: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/documents/{document_id}/analysis")
+async def get_document_analysis(document_id: str):
+    """Get analysis results for a document"""
+    try:
+        async with db_pool.acquire() as conn:
+            analysis_row = await conn.fetchrow("""
+                SELECT analysis_id, document_id, case_id, workflow_id, analysis_content,
+                       extracted_data, confidence_score, red_flags, recommendations,
+                       analysis_status, model_used, tokens_used, analysis_cost_cents,
+                       analyzed_at, created_at, updated_at
+                FROM document_analysis 
+                WHERE document_id = $1
+                ORDER BY analyzed_at DESC
+                LIMIT 1
+            """, document_id)
+            
+            if not analysis_row:
+                raise HTTPException(status_code=404, detail="Analysis not found for document")
+            
+            result = dict(analysis_row)
+            
+            # Parse JSON fields
+            if result['extracted_data']:
+                result['extracted_data'] = json.loads(result['extracted_data'])
+            if result['red_flags']:
+                result['red_flags'] = json.loads(result['red_flags'])
+            
+            # Convert timestamps to ISO format
+            for field in ['analyzed_at', 'created_at', 'updated_at']:
+                if result[field]:
+                    result[field] = result[field].isoformat()
+            
+            return result
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get analysis result: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/cases/{case_id}/analysis-summary")
+async def get_case_analysis_summary(case_id: str):
+    """Get analysis summary for all documents in a case"""
+    try:
+        async with db_pool.acquire() as conn:
+            # Get case details
+            case_row = await conn.fetchrow("SELECT * FROM cases WHERE case_id = $1", case_id)
+            if not case_row:
+                raise HTTPException(status_code=404, detail="Case not found")
+            
+            # Get analysis results for all documents in the case
+            analysis_rows = await conn.fetch("""
+                SELECT da.analysis_id, da.document_id, d.filename, d.document_type,
+                       da.confidence_score, da.analysis_status, da.analyzed_at,
+                       da.red_flags, da.model_used
+                FROM document_analysis da
+                JOIN documents d ON da.document_id = d.document_id
+                WHERE da.case_id = $1
+                ORDER BY da.analyzed_at DESC
+            """, case_id)
+            
+            analysis_summary = []
+            total_red_flags = 0
+            avg_confidence = 0
+            
+            for row in analysis_rows:
+                red_flags = json.loads(row['red_flags']) if row['red_flags'] else []
+                total_red_flags += len(red_flags)
+                
+                analysis_summary.append({
+                    "analysis_id": row['analysis_id'],
+                    "document_id": row['document_id'],
+                    "filename": row['filename'],
+                    "document_type": row['document_type'],
+                    "confidence_score": row['confidence_score'],
+                    "analysis_status": row['analysis_status'],
+                    "analyzed_at": row['analyzed_at'].isoformat(),
+                    "red_flags_count": len(red_flags),
+                    "model_used": row['model_used']
+                })
+            
+            if analysis_summary:
+                avg_confidence = sum(a['confidence_score'] for a in analysis_summary if a['confidence_score']) / len(analysis_summary)
+            
+            return {
+                "case_id": case_id,
+                "client_name": case_row['client_name'],
+                "total_documents_analyzed": len(analysis_summary),
+                "average_confidence_score": round(avg_confidence, 1),
+                "total_red_flags": total_red_flags,
+                "analysis_results": analysis_summary
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get case analysis summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Case Management
 @app.post("/api/cases")
