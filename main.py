@@ -18,6 +18,7 @@ from pydantic import BaseModel
 import asyncpg
 import resend
 import httpx
+from datetime import datetime, timezone
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -164,6 +165,27 @@ async def close_database():
     if db_pool:
         await db_pool.close()
     logger.info("Database connections closed")
+    
+def parse_uploaded_timestamp(timestamp_str: str) -> datetime:
+    """Parse uploaded timestamp handling timezone properly"""
+    try:
+        # Handle ISO format with 'Z' (UTC)
+        if timestamp_str.endswith('Z'):
+            timestamp_str = timestamp_str.replace('Z', '+00:00')
+        
+        # Parse the timestamp
+        uploaded_at = parse_uploaded_timestamp(file_upload.uploadedAt)
+        
+        # Convert to UTC and make timezone-naive for database storage
+        if uploaded_at.tzinfo is not None:
+            uploaded_at = uploaded_at.astimezone(timezone.utc).replace(tzinfo=None)
+        
+        return uploaded_at
+        
+    except Exception as e:
+        logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}")
+        # Return current UTC time as fallback
+        return datetime.utcnow()
 
 # Email sending function
 async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
@@ -194,12 +216,12 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
             message_id, request.case_id, request.recipient_email, 
             request.subject, request.body, request.html_body,
             request.email_type, "sent", "resend", resend_id,
-            json.dumps(request.metadata), datetime.now())
+            json.dumps(request.metadata), datetime.utcnow())
             
             # Update case communication date
             await conn.execute(
                 "UPDATE cases SET last_communication_date = $1 WHERE case_id = $2",
-                datetime.now(), request.case_id
+                datetime.utcnow(), case_id  # Use utcnow() instead of now()
             )
         
         logger.info(f"Email sent via Resend - ID: {resend_id}, To: {request.recipient_email}")
@@ -223,7 +245,7 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
             """, 
             message_id, request.case_id, request.recipient_email, 
             request.subject, request.body, request.email_type,
-            "failed", "resend_error", str(e), datetime.now())
+            "failed", "resend_error", str(e), datetime.utcnow())
         
         logger.error(f"Email sending failed: {e}")
         raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
@@ -261,7 +283,7 @@ async def health_check():
         
         return {
             "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat(),
             "database": "connected",
             "email": "resend_configured"
         }
@@ -313,13 +335,13 @@ async def handle_document_upload(request: S3UploadWebhookRequest, background_tas
                 try:
                     uploaded_at = datetime.fromisoformat(file_upload.uploadedAt.replace('Z', '+00:00'))
                 except:
-                    uploaded_at = datetime.now()
+                    uploaded_at = datetime.utcnow()
                 
                 # Insert document record
                 await conn.execute("""
                     INSERT INTO documents 
                     (document_id, case_id, filename, file_size, file_type, 
-                     s3_location, s3_key, s3_etag, document_type, status, uploaded_at)
+                    s3_location, s3_key, s3_etag, document_type, status, uploaded_at)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 """,
                 document_id, case_id, file_upload.fileName, file_upload.fileSize,
@@ -379,7 +401,7 @@ async def trigger_document_analysis(document_id: str, case_id: str, s3_location:
         async with db_pool.acquire() as conn:
             await conn.execute(
                 "UPDATE documents SET status = 'analyzing', updated_at = $1 WHERE document_id = $2",
-                datetime.now(), document_id
+                datetime.utcnow(), document_id
             )
         
         # Call Document Analysis Agent
@@ -407,7 +429,7 @@ async def trigger_document_analysis(document_id: str, case_id: str, s3_location:
                 async with db_pool.acquire() as conn:
                     await conn.execute(
                         "UPDATE documents SET status = 'failed', updated_at = $1 WHERE document_id = $2",
-                        datetime.now(), document_id
+                        datetime.utcnow(), document_id
                     )
                 
     except Exception as e:
@@ -418,7 +440,7 @@ async def trigger_document_analysis(document_id: str, case_id: str, s3_location:
             async with db_pool.acquire() as conn:
                 await conn.execute(
                     "UPDATE documents SET status = 'failed', updated_at = $1 WHERE document_id = $2",
-                    datetime.now(), document_id
+                    datetime.utcnow(), document_id
                 )
         except Exception as db_error:
             logger.error(f"Failed to update document status: {db_error}")
@@ -458,12 +480,12 @@ async def store_document_analysis(document_id: str, request: AnalysisResultReque
             request.analysis_content, json.dumps(request.extracted_data) if request.extracted_data else None,
             request.confidence_score, json.dumps(request.red_flags) if request.red_flags else None,
             request.recommendations, request.analysis_status, request.model_used,
-            request.tokens_used, request.analysis_cost_cents, datetime.now())
+            request.tokens_used, request.analysis_cost_cents, datetime.utcnow())
             
             # Update document status to analyzed
             await conn.execute(
                 "UPDATE documents SET status = 'analyzed', updated_at = $1 WHERE document_id = $2",
-                datetime.now(), document_id
+                datetime.utcnow(), document_id
             )
             
             logger.info(f"Stored analysis result {analysis_id} for document {document_id}")
@@ -473,7 +495,7 @@ async def store_document_analysis(document_id: str, request: AnalysisResultReque
                 document_id=document_id,
                 case_id=request.case_id,
                 status="stored",
-                analyzed_at=datetime.now().isoformat()
+                analyzed_at=datetime.utcnow().isoformat()
             )
             
     except HTTPException:
@@ -592,7 +614,7 @@ async def create_case(request: CaseCreateRequest):
                 VALUES ($1, $2, $3, $4, $5, $6)
             """, 
             request.case_id, request.client_name, request.client_email, 
-            "awaiting_documents", request.documents_requested, datetime.now())
+            "awaiting_documents", request.documents_requested, datetime.utcnow())
             
             return {
                 "case_id": request.case_id,
@@ -677,7 +699,7 @@ async def get_pending_reminder_cases():
     """Get cases that need reminder emails"""
     try:
         async with db_pool.acquire() as conn:
-            cutoff_date = datetime.now() - timedelta(days=3)
+            cutoff_date = datetime.utcnow() - timedelta(days=3)
             
             rows = await conn.fetch("""
                 SELECT case_id, client_email, client_name, status, 
@@ -724,7 +746,7 @@ async def create_workflow(request: WorkflowCreateRequest):
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """,
             request.workflow_id, request.agent_type, request.case_id, request.status.value,
-            request.initial_prompt, json.dumps([]), datetime.now(), datetime.now())
+            request.initial_prompt, json.dumps([]), datetime.utcnow(), datetime.utcnow())
             
             return {
                 "workflow_id": request.workflow_id,
@@ -733,8 +755,8 @@ async def create_workflow(request: WorkflowCreateRequest):
                 "status": request.status.value,
                 "initial_prompt": request.initial_prompt,
                 "reasoning_chain": [],
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat()
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat()
             }
             
     except asyncpg.UniqueViolationError:
@@ -779,7 +801,7 @@ async def update_workflow_status(workflow_id: str, request: WorkflowStatusReques
         async with db_pool.acquire() as conn:
             result = await conn.execute(
                 "UPDATE workflow_states SET status = $1, updated_at = $2 WHERE workflow_id = $3",
-                request.status.value, datetime.now(), workflow_id
+                request.status.value, datetime.utcnow(), workflow_id
             )
             
             if result == "UPDATE 0":
@@ -812,7 +834,7 @@ async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
             # Update database
             await conn.execute(
                 "UPDATE workflow_states SET reasoning_chain = $1, updated_at = $2 WHERE workflow_id = $3",
-                json.dumps(chain), datetime.now(), workflow_id
+                json.dumps(chain), datetime.utcnow(), workflow_id
             )
             
             return {"status": "step_added", "workflow_id": workflow_id}
