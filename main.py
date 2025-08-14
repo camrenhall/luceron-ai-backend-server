@@ -13,7 +13,7 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 from enum import Enum
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import asyncpg
 import resend
