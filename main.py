@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 # Environment configuration
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "legal@blueprintsw.com")
-DOCUMENT_ANALYSIS_AGENT_URL = os.getenv("DOCUMENT_ANALYSIS_AGENT_URL", "http://localhost:8081")
+FROM_EMAIL = os.getenv("FROM_EMAIL")
+DOCUMENT_ANALYSIS_AGENT_URL = os.getenv("DOCUMENT_ANALYSIS_AGENT_URL")
 PORT = int(os.getenv("PORT", 8080))
 
 if not DATABASE_URL:
