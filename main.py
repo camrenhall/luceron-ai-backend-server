@@ -305,12 +305,32 @@ def convert_pdf_to_pngs(pdf_data: bytes) -> List[bytes]:
     """Convert PDF to list of PNG images (one per page) with high quality"""
     try:
         # Convert PDF to images with high DPI for quality
-        images = convert_from_bytes(
-            pdf_data,
-            dpi=300,  # High DPI for quality
-            fmt='PNG',
-            thread_count=1
-        )
+        # Try default first, then with explicit poppler path if needed
+        try:
+            images = convert_from_bytes(
+                pdf_data,
+                dpi=300,  # High DPI for quality
+                fmt='PNG',
+                thread_count=1
+            )
+        except Exception as poppler_error:
+            # Try with explicit poppler path (common Docker/Linux locations)
+            poppler_paths = ['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin']
+            for poppler_path in poppler_paths:
+                try:
+                    images = convert_from_bytes(
+                        pdf_data,
+                        dpi=300,
+                        fmt='PNG', 
+                        thread_count=1,
+                        poppler_path=poppler_path
+                    )
+                    break
+                except:
+                    continue
+            else:
+                # If all paths fail, raise the original error
+                raise poppler_error
         
         png_list = []
         for img in images:
