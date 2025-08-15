@@ -13,6 +13,23 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 from enum import Enum
 
+# New enums for client communications
+class CommunicationChannel(str, Enum):
+    EMAIL = "email"
+    PHONE = "phone"
+    SMS = "sms"
+    PORTAL = "portal"
+
+class CommunicationDirection(str, Enum):
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+
+class DeliveryStatus(str, Enum):
+    SENT = "sent"
+    DELIVERED = "delivered" 
+    FAILED = "failed"
+    PENDING = "pending"
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import asyncpg
@@ -56,15 +73,19 @@ class CaseData(BaseModel):
     case_id: str
     client_email: str
     client_name: str
+    client_phone: Optional[str] = None
     status: str
-    last_communication_date: Optional[datetime]
-    documents_requested: str
+
+class RequestedDocument(BaseModel):
+    document_name: str
+    description: Optional[str] = None
 
 class CaseCreateRequest(BaseModel):
     case_id: str
     client_name: str
     client_email: str
-    documents_requested: str
+    client_phone: Optional[str] = None
+    requested_documents: List[RequestedDocument]
 
 class EmailRequest(BaseModel):
     recipient_email: str
@@ -81,6 +102,16 @@ class EmailResponse(BaseModel):
     recipient: str
     case_id: str
     sent_via: str
+
+class ClientCommunication(BaseModel):
+    case_id: str
+    channel: CommunicationChannel
+    direction: CommunicationDirection
+    status: DeliveryStatus
+    sender: str
+    recipient: str
+    subject: Optional[str] = None
+    message_content: str
 
 class ReasoningStep(BaseModel):
     timestamp: str
@@ -207,22 +238,27 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
         
         # Log to database
         async with db_pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO email_logs 
-                (message_id, case_id, recipient_email, subject, body, html_body, 
-                 email_type, status, sent_via, resend_id, metadata, sent_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            """, 
-            message_id, request.case_id, request.recipient_email, 
-            request.subject, request.body, request.html_body,
-            request.email_type, "sent", "resend", resend_id,
-            json.dumps(request.metadata), datetime.utcnow())
-            
-            # Update case communication date
-            await conn.execute(
-                "UPDATE cases SET last_communication_date = $1 WHERE case_id = $2",
-                datetime.utcnow(), case_id  # Use utcnow() instead of now()
-            )
+            async with conn.transaction():
+                # Insert into email_logs (keeping for backward compatibility)
+                await conn.execute("""
+                    INSERT INTO email_logs 
+                    (message_id, case_id, recipient_email, subject, body, html_body, 
+                     email_type, status, sent_via, resend_id, metadata, sent_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                """, 
+                message_id, request.case_id, request.recipient_email, 
+                request.subject, request.body, request.html_body,
+                request.email_type, "sent", "resend", resend_id,
+                json.dumps(request.metadata), datetime.utcnow())
+                
+                # Insert into new client_communications table
+                await conn.execute("""
+                    INSERT INTO client_communications 
+                    (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                request.case_id, "email", "outbound", "sent", FROM_EMAIL, 
+                request.recipient_email, request.subject, request.body, datetime.utcnow())
         
         logger.info(f"Email sent via Resend - ID: {resend_id}, To: {request.recipient_email}")
         
@@ -237,15 +273,26 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
     except Exception as e:
         # Log failure
         async with db_pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO email_logs 
-                (message_id, case_id, recipient_email, subject, body, 
-                 email_type, status, sent_via, error_message, sent_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            """, 
-            message_id, request.case_id, request.recipient_email, 
-            request.subject, request.body, request.email_type,
-            "failed", "resend_error", str(e), datetime.utcnow())
+            async with conn.transaction():
+                # Insert into email_logs (keeping for backward compatibility)
+                await conn.execute("""
+                    INSERT INTO email_logs 
+                    (message_id, case_id, recipient_email, subject, body, 
+                     email_type, status, sent_via, error_message, sent_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                """, 
+                message_id, request.case_id, request.recipient_email, 
+                request.subject, request.body, request.email_type,
+                "failed", "resend_error", str(e), datetime.utcnow())
+                
+                # Insert into new client_communications table
+                await conn.execute("""
+                    INSERT INTO client_communications 
+                    (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                request.case_id, "email", "outbound", "failed", FROM_EMAIL, 
+                request.recipient_email, request.subject, request.body, datetime.utcnow())
         
         logger.error(f"Email sending failed: {e}")
         raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
@@ -640,19 +687,31 @@ async def create_case(request: CaseCreateRequest):
     """Create a new case"""
     try:
         async with db_pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO cases (case_id, client_name, client_email, status, documents_requested, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
-            """, 
-            request.case_id, request.client_name, request.client_email, 
-            "awaiting_documents", request.documents_requested, datetime.utcnow())
+            async with conn.transaction():
+                # Create the case
+                await conn.execute("""
+                    INSERT INTO cases (case_id, client_name, client_email, client_phone, status, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                """, 
+                request.case_id, request.client_name, request.client_email, 
+                request.client_phone, "awaiting_documents", datetime.utcnow())
+                
+                # Insert requested documents
+                for doc in request.requested_documents:
+                    await conn.execute("""
+                        INSERT INTO requested_documents (case_id, document_name, description, requested_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    request.case_id, doc.document_name, doc.description, 
+                    datetime.utcnow(), datetime.utcnow())
             
             return {
                 "case_id": request.case_id,
                 "client_name": request.client_name,
                 "client_email": request.client_email,
+                "client_phone": request.client_phone,
                 "status": "awaiting_documents",
-                "documents_requested": request.documents_requested
+                "requested_documents": [doc.dict() for doc in request.requested_documents]
             }
             
     except asyncpg.UniqueViolationError:
@@ -673,14 +732,45 @@ async def get_case(case_id: str):
             if not case_row:
                 raise HTTPException(status_code=404, detail="Case not found")
             
+            # Get requested documents for this case
+            requested_docs = await conn.fetch("""
+                SELECT id, document_name, description, is_completed, completed_at, 
+                       is_flagged_for_review, notes, requested_at, updated_at
+                FROM requested_documents 
+                WHERE case_id = $1 
+                ORDER BY requested_at ASC
+            """, case_id)
+            
+            # Get last communication date from client_communications
+            last_comm = await conn.fetchrow("""
+                SELECT communication_at 
+                FROM client_communications 
+                WHERE case_id = $1 
+                ORDER BY communication_at DESC 
+                LIMIT 1
+            """, case_id)
+            
             return {
                 "case_id": case_row['case_id'],
                 "client_name": case_row['client_name'],
                 "client_email": case_row['client_email'],
+                "client_phone": case_row['client_phone'],
                 "status": case_row['status'],
-                "documents_requested": case_row['documents_requested'],
                 "created_at": case_row['created_at'].isoformat(),
-                "last_communication_date": case_row['last_communication_date'].isoformat() if case_row['last_communication_date'] else None
+                "last_communication_date": last_comm['communication_at'].isoformat() if last_comm else None,
+                "requested_documents": [
+                    {
+                        "id": str(doc['id']),
+                        "document_name": doc['document_name'],
+                        "description": doc['description'],
+                        "is_completed": doc['is_completed'],
+                        "completed_at": doc['completed_at'].isoformat() if doc['completed_at'] else None,
+                        "is_flagged_for_review": doc['is_flagged_for_review'],
+                        "notes": doc['notes'],
+                        "requested_at": doc['requested_at'].isoformat(),
+                        "updated_at": doc['updated_at'].isoformat()
+                    } for doc in requested_docs
+                ]
             }
             
     except Exception as e:
@@ -697,7 +787,26 @@ async def get_case_communications(case_id: str):
             if not case_row:
                 raise HTTPException(status_code=404, detail="Case not found")
             
-            # Get email history
+            # Get requested documents for this case
+            requested_docs = await conn.fetch("""
+                SELECT id, document_name, description, is_completed, completed_at, 
+                       is_flagged_for_review, notes, requested_at, updated_at
+                FROM requested_documents 
+                WHERE case_id = $1 
+                ORDER BY requested_at ASC
+            """, case_id)
+            
+            # Get communication history from new table
+            communications = await conn.fetch("""
+                SELECT id, channel, direction, status, opened_at, sender, recipient, 
+                       subject, message_content, communication_at
+                FROM client_communications 
+                WHERE case_id = $1 
+                ORDER BY communication_at DESC
+                LIMIT 50
+            """, case_id)
+            
+            # Get email history for backward compatibility
             email_logs = await conn.fetch("""
                 SELECT message_id, recipient_email, subject, email_type, 
                        status, sent_via, sent_at, metadata
@@ -711,14 +820,42 @@ async def get_case_communications(case_id: str):
                 "case_id": case_id,
                 "client_name": case_row['client_name'],
                 "client_email": case_row['client_email'],
+                "client_phone": case_row['client_phone'],
                 "case_status": case_row['status'],
-                "documents_requested": case_row['documents_requested'],
-                "last_communication_date": case_row['last_communication_date'].isoformat() if case_row['last_communication_date'] else None,
+                "requested_documents": [
+                    {
+                        "id": str(doc['id']),
+                        "document_name": doc['document_name'],
+                        "description": doc['description'],
+                        "is_completed": doc['is_completed'],
+                        "completed_at": doc['completed_at'].isoformat() if doc['completed_at'] else None,
+                        "is_flagged_for_review": doc['is_flagged_for_review'],
+                        "notes": doc['notes'],
+                        "requested_at": doc['requested_at'].isoformat(),
+                        "updated_at": doc['updated_at'].isoformat()
+                    } for doc in requested_docs
+                ],
+                "last_communication_date": communications[0]['communication_at'].isoformat() if communications else None,
                 "communication_summary": {
+                    "total_communications": len(communications),
                     "total_emails": len(email_logs),
-                    "last_email_date": email_logs[0]['sent_at'].isoformat() if email_logs else None
+                    "last_communication_date": communications[0]['communication_at'].isoformat() if communications else None
                 },
-                "email_history": [dict(log) for log in email_logs]
+                "communications": [
+                    {
+                        "id": str(comm['id']),
+                        "channel": comm['channel'],
+                        "direction": comm['direction'],
+                        "status": comm['status'],
+                        "opened_at": comm['opened_at'].isoformat() if comm['opened_at'] else None,
+                        "sender": comm['sender'],
+                        "recipient": comm['recipient'],
+                        "subject": comm['subject'],
+                        "message_content": comm['message_content'],
+                        "communication_at": comm['communication_at'].isoformat()
+                    } for comm in communications
+                ],
+                "email_history": [dict(log) for log in email_logs]  # Keep for backward compatibility
             }
             
     except Exception as e:
@@ -732,25 +869,43 @@ async def get_pending_reminder_cases():
         async with db_pool.acquire() as conn:
             cutoff_date = datetime.utcnow() - timedelta(days=3)
             
+            # Get cases and their last communication date from the new table
             rows = await conn.fetch("""
-                SELECT case_id, client_email, client_name, status, 
-                       last_communication_date, documents_requested
-                FROM cases 
-                WHERE status = 'awaiting_documents' 
-                AND (last_communication_date IS NULL OR last_communication_date < $1)
-                ORDER BY last_communication_date ASC NULLS FIRST
+                SELECT c.case_id, c.client_email, c.client_name, c.client_phone, c.status,
+                       MAX(cc.communication_at) as last_communication_date
+                FROM cases c
+                LEFT JOIN client_communications cc ON c.case_id = cc.case_id
+                WHERE c.status = 'awaiting_documents'
+                GROUP BY c.case_id, c.client_email, c.client_name, c.client_phone, c.status
+                HAVING MAX(cc.communication_at) IS NULL OR MAX(cc.communication_at) < $1
+                ORDER BY MAX(cc.communication_at) ASC NULLS FIRST
                 LIMIT 20
             """, cutoff_date)
             
             cases = []
             for row in rows:
+                # Get requested documents for each case
+                requested_docs = await conn.fetch("""
+                    SELECT document_name, description, is_completed
+                    FROM requested_documents 
+                    WHERE case_id = $1 
+                    ORDER BY requested_at ASC
+                """, row['case_id'])
+                
                 cases.append({
                     "case_id": row['case_id'],
                     "client_email": row['client_email'],
                     "client_name": row['client_name'],
+                    "client_phone": row['client_phone'],
                     "status": row['status'],
                     "last_communication_date": row['last_communication_date'].isoformat() if row['last_communication_date'] else None,
-                    "documents_requested": row['documents_requested']
+                    "requested_documents": [
+                        {
+                            "document_name": doc['document_name'],
+                            "description": doc['description'],
+                            "is_completed": doc['is_completed']
+                        } for doc in requested_docs
+                    ]
                 })
             
             return {"found_cases": len(cases), "cases": cases}
