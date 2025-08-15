@@ -310,8 +310,8 @@ async def handle_document_upload(request: S3UploadWebhookRequest, background_tas
                 # Extract client email from metadata
                 client_email = request.metadata.get("clientEmail")
                 if not client_email:
-                    logger.error("No clientEmail in webhook metadata")
-                    continue
+                    logger.error("❌ No clientEmail in webhook metadata")
+                    raise HTTPException(status_code=400, detail="Missing clientEmail in webhook metadata")
                 
                 # Find case by client email
                 case_row = await conn.fetchrow(
@@ -320,8 +320,12 @@ async def handle_document_upload(request: S3UploadWebhookRequest, background_tas
                 )
                 
                 if not case_row:
-                    logger.warning(f"No active case found for client email: {client_email}")
-                    continue
+                    logger.error(f"❌ CRITICAL: No active case found for client email: {client_email}")
+                    logger.error(f"❌ Document upload failed - client {client_email} does not have an active case")
+                    raise HTTPException(
+                        status_code=404, 
+                        detail=f"No active case found for client email: {client_email}. Please ensure a case exists with status 'awaiting_documents'."
+                    )
                 
                 case_id = case_row['case_id']
                 
