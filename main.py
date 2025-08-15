@@ -135,13 +135,8 @@ class AnalysisResultRequest(BaseModel):
     case_id: str
     workflow_id: Optional[str] = None
     analysis_content: str
-    extracted_data: Optional[dict] = None
-    confidence_score: Optional[int] = None
-    red_flags: Optional[List[str]] = None
-    recommendations: Optional[str] = None
     model_used: str = "o3"
     tokens_used: Optional[int] = None
-    analysis_cost_cents: Optional[int] = None
     analysis_status: str = "completed"
 
 class AnalysisResultResponse(BaseModel):
@@ -584,15 +579,12 @@ async def store_document_analysis(document_id: str, request: AnalysisResultReque
             await conn.execute("""
                 INSERT INTO document_analysis 
                 (analysis_id, document_id, case_id, workflow_id, analysis_content, 
-                 extracted_data, confidence_score, red_flags, recommendations,
-                 analysis_status, model_used, tokens_used, analysis_cost_cents, analyzed_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                 analysis_status, model_used, tokens_used, analyzed_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """, 
             analysis_id, document_id, request.case_id, request.workflow_id,
-            request.analysis_content, json.dumps(request.extracted_data) if request.extracted_data else None,
-            request.confidence_score, json.dumps(request.red_flags) if request.red_flags else None,
-            request.recommendations, request.analysis_status, request.model_used,
-            request.tokens_used, request.analysis_cost_cents, datetime.utcnow())
+            request.analysis_content, request.analysis_status, request.model_used,
+            request.tokens_used, datetime.utcnow())
             
             # Update document status to analyzed
             await conn.execute(
@@ -623,9 +615,7 @@ async def get_document_analysis(document_id: str):
         async with db_pool.acquire() as conn:
             analysis_row = await conn.fetchrow("""
                 SELECT analysis_id, document_id, case_id, workflow_id, analysis_content,
-                       extracted_data, confidence_score, red_flags, recommendations,
-                       analysis_status, model_used, tokens_used, analysis_cost_cents,
-                       analyzed_at, created_at
+                       analysis_status, model_used, tokens_used, analyzed_at, created_at
                 FROM document_analysis 
                 WHERE document_id = $1
                 ORDER BY analyzed_at DESC
@@ -636,12 +626,6 @@ async def get_document_analysis(document_id: str):
                 raise HTTPException(status_code=404, detail="Analysis not found for document")
             
             result = dict(analysis_row)
-            
-            # Parse JSON fields
-            if result['extracted_data']:
-                result['extracted_data'] = json.loads(result['extracted_data'])
-            if result['red_flags']:
-                result['red_flags'] = json.loads(result['red_flags'])
             
             # Convert timestamps to ISO format
             for field in ['analyzed_at', 'created_at']:
@@ -669,8 +653,7 @@ async def get_case_analysis_summary(case_id: str):
             # Get analysis results for all documents in the case
             analysis_rows = await conn.fetch("""
                 SELECT da.analysis_id, da.document_id, d.filename,
-                       da.confidence_score, da.analysis_status, da.analyzed_at,
-                       da.red_flags, da.model_used
+                       da.analysis_status, da.analyzed_at, da.model_used
                 FROM document_analysis da
                 JOIN documents d ON da.document_id = d.document_id
                 WHERE da.case_id = $1
@@ -678,33 +661,21 @@ async def get_case_analysis_summary(case_id: str):
             """, case_id)
             
             analysis_summary = []
-            total_red_flags = 0
-            avg_confidence = 0
             
             for row in analysis_rows:
-                red_flags = json.loads(row['red_flags']) if row['red_flags'] else []
-                total_red_flags += len(red_flags)
-                
                 analysis_summary.append({
                     "analysis_id": row['analysis_id'],
                     "document_id": row['document_id'],
                     "filename": row['filename'],
-                    "confidence_score": row['confidence_score'],
                     "analysis_status": row['analysis_status'],
                     "analyzed_at": row['analyzed_at'].isoformat(),
-                    "red_flags_count": len(red_flags),
                     "model_used": row['model_used']
                 })
-            
-            if analysis_summary:
-                avg_confidence = sum(a['confidence_score'] for a in analysis_summary if a['confidence_score']) / len(analysis_summary)
             
             return {
                 "case_id": case_id,
                 "client_name": case_row['client_name'],
                 "total_documents_analyzed": len(analysis_summary),
-                "average_confidence_score": round(avg_confidence, 1),
-                "total_red_flags": total_red_flags,
                 "analysis_results": analysis_summary
             }
             
