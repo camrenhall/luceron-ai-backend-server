@@ -178,19 +178,30 @@ class ResendTag(BaseModel):
     name: str
     value: str
 
-class ResendEmailOpenedData(BaseModel):
+class ResendFailedInfo(BaseModel):
+    reason: str
+
+class ResendBounceInfo(BaseModel):
+    message: str
+    subType: str
+    type: str
+
+class ResendWebhookData(BaseModel):
     broadcast_id: Optional[str] = None
-    created_at: str  # This is when email was created (NOT when opened)
+    created_at: str  # This is when email was created (NOT when event occurred)
     email_id: str
     from_: str = Field(alias="from")
     to: List[str]
     subject: str
     tags: Optional[List[ResendTag]] = []
+    # Optional fields for different event types
+    failed: Optional[ResendFailedInfo] = None
+    bounce: Optional[ResendBounceInfo] = None
 
-class ResendEmailOpenedWebhook(BaseModel):
-    type: str
-    created_at: str  # This is when email was OPENED (webhook timestamp)
-    data: ResendEmailOpenedData
+class ResendWebhook(BaseModel):
+    type: str  # "email.opened", "email.failed", "email.bounced"
+    created_at: str  # This is when event occurred (webhook timestamp)
+    data: ResendWebhookData
 
 # Database initialization
 async def init_database():
@@ -422,37 +433,81 @@ async def handle_document_upload(request: S3UploadWebhookRequest, background_tas
         logger.error(f"Document upload webhook failed: {e}")
         raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
 
-@app.post("/api/webhooks/email-opened")
-async def handle_email_opened_webhook(webhook: ResendEmailOpenedWebhook):
-    """Handle Resend email opened webhook"""
+@app.post("/api/webhooks/resend")
+async def handle_resend_webhook(webhook: ResendWebhook):
+    """Handle Resend webhooks (email.opened, email.delivered, email.failed, email.bounced)"""
     
-    logger.info(f"📧 Email opened webhook received: type={webhook.type}, email_id={webhook.data.email_id}")
+    logger.info(f"📧 Resend webhook received: type={webhook.type}, email_id={webhook.data.email_id}")
     
     try:
-        # Parse the opened timestamp (top-level created_at is when email was opened)
-        opened_at = parse_uploaded_timestamp(webhook.created_at)
-        
         async with db_pool.acquire() as conn:
-            # Update the client_communications table using resend_id (email_id)
-            result = await conn.execute("""
-                UPDATE client_communications 
-                SET opened_at = $1 
-                WHERE resend_id = $2
-            """, opened_at, webhook.data.email_id)
+            if webhook.type == "email.opened":
+                # Parse the opened timestamp (top-level created_at is when email was opened)
+                opened_at = parse_uploaded_timestamp(webhook.created_at)
+                
+                # Update opened_at timestamp AND set status to "opened"
+                result = await conn.execute("""
+                    UPDATE client_communications 
+                    SET opened_at = $1, status = 'opened'
+                    WHERE resend_id = $2
+                """, opened_at, webhook.data.email_id)
+                
+                action = "opened"
+                
+            elif webhook.type == "email.failed":
+                # Only update status to "failed" (no timestamp update)
+                result = await conn.execute("""
+                    UPDATE client_communications 
+                    SET status = 'failed'
+                    WHERE resend_id = $1
+                """, webhook.data.email_id)
+                
+                failure_reason = webhook.data.failed.reason if webhook.data.failed else "unknown"
+                logger.info(f"❌ Email failed: reason={failure_reason}")
+                action = f"failed (reason: {failure_reason})"
+                
+            elif webhook.type == "email.bounced":
+                # Only update status to "failed" (no timestamp update)
+                result = await conn.execute("""
+                    UPDATE client_communications 
+                    SET status = 'failed'
+                    WHERE resend_id = $1
+                """, webhook.data.email_id)
+                
+                bounce_info = ""
+                if webhook.data.bounce:
+                    bounce_info = f"{webhook.data.bounce.type}/{webhook.data.bounce.subType}: {webhook.data.bounce.message}"
+                
+                logger.info(f"🔄 Email bounced: {bounce_info}")
+                action = f"bounced ({bounce_info})"
+                
+            elif webhook.type == "email.delivered":
+                # Only update status to "delivered" (no timestamp update)
+                result = await conn.execute("""
+                    UPDATE client_communications 
+                    SET status = 'delivered'
+                    WHERE resend_id = $1
+                """, webhook.data.email_id)
+                
+                action = "delivered"
+                
+            else:
+                logger.warning(f"⚠️ Unsupported webhook type: {webhook.type}")
+                return {"status": "unsupported", "type": webhook.type, "message": "Webhook type not supported"}
             
             # Check if any row was updated
             rows_updated = int(result.split()[-1]) if result.startswith("UPDATE") else 0
             
             if rows_updated > 0:
-                logger.info(f"✅ Email opened: Updated {rows_updated} record(s) for email_id={webhook.data.email_id}")
-                return {"status": "updated", "email_id": webhook.data.email_id, "rows_updated": rows_updated}
+                logger.info(f"✅ Email {action}: Updated {rows_updated} record(s) for email_id={webhook.data.email_id}")
+                return {"status": "updated", "email_id": webhook.data.email_id, "rows_updated": rows_updated, "action": action}
             else:
                 # Email ID not found - log but don't fail (as per requirements)
-                logger.info(f"ℹ️ Email opened webhook: email_id={webhook.data.email_id} not found in database (likely from another system)")
+                logger.info(f"ℹ️ Resend webhook: email_id={webhook.data.email_id} not found in database (likely from another system)")
                 return {"status": "not_found", "email_id": webhook.data.email_id, "message": "Email ID not found in database"}
         
     except Exception as e:
-        logger.error(f"Email opened webhook processing failed: {e}")
+        logger.error(f"Resend webhook processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
 
 def classify_document_type(filename: str) -> str:
