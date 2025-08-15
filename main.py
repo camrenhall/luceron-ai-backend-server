@@ -234,7 +234,13 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
         }
         
         result = resend.Emails.send(email_data)
-        resend_id = result.id if hasattr(result, 'id') else str(result)
+        # Extract just the ID string from the Resend response
+        if hasattr(result, 'id'):
+            resend_id = result.id
+        elif isinstance(result, dict) and 'id' in result:
+            resend_id = result['id']
+        else:
+            resend_id = None
         
         # Log to database
         async with db_pool.acquire() as conn:
