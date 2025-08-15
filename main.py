@@ -29,7 +29,7 @@ class DeliveryStatus(str, Enum):
     OPENED = "opened"
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import asyncpg
 import resend
 import httpx
@@ -173,6 +173,24 @@ class DocumentUploadResponse(BaseModel):
     analysis_triggered: bool
     workflow_ids: List[str]
     message: str
+
+class ResendTag(BaseModel):
+    name: str
+    value: str
+
+class ResendEmailOpenedData(BaseModel):
+    broadcast_id: Optional[str] = None
+    created_at: str  # This is when email was created (NOT when opened)
+    email_id: str
+    from_: str = Field(alias="from")
+    to: List[str]
+    subject: str
+    tags: Optional[List[ResendTag]] = []
+
+class ResendEmailOpenedWebhook(BaseModel):
+    type: str
+    created_at: str  # This is when email was OPENED (webhook timestamp)
+    data: ResendEmailOpenedData
 
 # Database initialization
 async def init_database():
@@ -402,6 +420,39 @@ async def handle_document_upload(request: S3UploadWebhookRequest, background_tas
         
     except Exception as e:
         logger.error(f"Document upload webhook failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
+
+@app.post("/api/webhooks/email-opened")
+async def handle_email_opened_webhook(webhook: ResendEmailOpenedWebhook):
+    """Handle Resend email opened webhook"""
+    
+    logger.info(f"📧 Email opened webhook received: type={webhook.type}, email_id={webhook.data.email_id}")
+    
+    try:
+        # Parse the opened timestamp (top-level created_at is when email was opened)
+        opened_at = parse_uploaded_timestamp(webhook.created_at)
+        
+        async with db_pool.acquire() as conn:
+            # Update the client_communications table using resend_id (email_id)
+            result = await conn.execute("""
+                UPDATE client_communications 
+                SET opened_at = $1 
+                WHERE resend_id = $2
+            """, opened_at, webhook.data.email_id)
+            
+            # Check if any row was updated
+            rows_updated = int(result.split()[-1]) if result.startswith("UPDATE") else 0
+            
+            if rows_updated > 0:
+                logger.info(f"✅ Email opened: Updated {rows_updated} record(s) for email_id={webhook.data.email_id}")
+                return {"status": "updated", "email_id": webhook.data.email_id, "rows_updated": rows_updated}
+            else:
+                # Email ID not found - log but don't fail (as per requirements)
+                logger.info(f"ℹ️ Email opened webhook: email_id={webhook.data.email_id} not found in database (likely from another system)")
+                return {"status": "not_found", "email_id": webhook.data.email_id, "message": "Email ID not found in database"}
+        
+    except Exception as e:
+        logger.error(f"Email opened webhook processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
 
 def classify_document_type(filename: str) -> str:
