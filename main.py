@@ -893,11 +893,16 @@ async def create_workflow(request: WorkflowCreateRequest):
         async with db_pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO workflow_states 
-                (workflow_id, agent_type, case_id, status, initial_prompt, reasoning_chain, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                (workflow_id, agent_type, case_id, status, initial_prompt, reasoning_chain)
+                VALUES ($1, $2, $3, $4, $5, $6)
             """,
             request.workflow_id, request.agent_type, request.case_id, request.status.value,
-            request.initial_prompt, json.dumps([]), datetime.utcnow(), datetime.utcnow())
+            request.initial_prompt, json.dumps([]))
+            
+            # Fetch the created workflow with auto-generated timestamps
+            row = await conn.fetchrow(
+                "SELECT * FROM workflow_states WHERE workflow_id = $1", request.workflow_id
+            )
             
             return {
                 "workflow_id": request.workflow_id,
@@ -906,8 +911,8 @@ async def create_workflow(request: WorkflowCreateRequest):
                 "status": request.status.value,
                 "initial_prompt": request.initial_prompt,
                 "reasoning_chain": [],
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
+                "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                "updated_at": row['updated_at'].isoformat() if row['updated_at'] else None
             }
             
     except asyncpg.UniqueViolationError:
@@ -951,8 +956,8 @@ async def update_workflow_status(workflow_id: str, request: WorkflowStatusReques
     try:
         async with db_pool.acquire() as conn:
             result = await conn.execute(
-                "UPDATE workflow_states SET status = $1, updated_at = $2 WHERE workflow_id = $3",
-                request.status.value, datetime.utcnow(), workflow_id
+                "UPDATE workflow_states SET status = $1, updated_at = now() WHERE workflow_id = $2",
+                request.status.value, workflow_id
             )
             
             if result == "UPDATE 0":
@@ -984,8 +989,8 @@ async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
             
             # Update database
             await conn.execute(
-                "UPDATE workflow_states SET reasoning_chain = $1, updated_at = $2 WHERE workflow_id = $3",
-                json.dumps(chain), datetime.utcnow(), workflow_id
+                "UPDATE workflow_states SET reasoning_chain = $1, updated_at = now() WHERE workflow_id = $2",
+                json.dumps(chain), workflow_id
             )
             
             return {"status": "step_added", "workflow_id": workflow_id}
