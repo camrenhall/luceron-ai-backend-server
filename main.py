@@ -389,22 +389,16 @@ async def handle_document_upload(request: S3UploadWebhookRequest, background_tas
                 # Generate document ID
                 document_id = f"doc_{uuid.uuid4().hex[:12]}"
                 
-                # Classify document type based on filename
-                document_type = classify_document_type(file_upload.fileName)
-                
-                # Parse uploaded timestamp
-                uploaded_at = parse_uploaded_timestamp(file_upload.uploadedAt)
-                
                 # Insert document record
                 await conn.execute("""
                     INSERT INTO documents 
                     (document_id, case_id, filename, file_size, file_type, 
-                    s3_location, s3_key, s3_etag, document_type, status, uploaded_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    s3_location, s3_key, s3_etag, status)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 """,
                 document_id, case_id, file_upload.fileName, file_upload.fileSize,
                 file_upload.fileType, file_upload.s3Location, file_upload.s3Key,
-                file_upload.s3ETag, document_type, "uploaded", uploaded_at)
+                file_upload.s3ETag, "uploaded")
                 
                 documents_created += 1
                 
@@ -510,22 +504,6 @@ async def handle_resend_webhook(webhook: ResendWebhook):
         logger.error(f"Resend webhook processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
 
-def classify_document_type(filename: str) -> str:
-    """Classify document type based on filename patterns"""
-    filename_lower = filename.lower()
-    
-    if any(term in filename_lower for term in ['bank', 'statement', 'checking', 'savings']):
-        return 'bank_statement'
-    elif any(term in filename_lower for term in ['tax', '1040', 'w2', 'w-2']):
-        return 'tax_return'
-    elif any(term in filename_lower for term in ['pay', 'stub', 'payroll', 'salary']):
-        return 'pay_stub'
-    elif any(term in filename_lower for term in ['investment', 'brokerage', '401k', 'ira']):
-        return 'investment_statement'
-    elif any(term in filename_lower for term in ['financial', 'asset', 'liability']):
-        return 'financial_record'
-    else:
-        return 'other'
 
 async def trigger_document_analysis(document_id: str, case_id: str, s3_location: str):
     """Background task to trigger document analysis agent"""
@@ -535,8 +513,8 @@ async def trigger_document_analysis(document_id: str, case_id: str, s3_location:
         # Update document status to analyzing
         async with db_pool.acquire() as conn:
             await conn.execute(
-                "UPDATE documents SET status = 'analyzing', updated_at = $1 WHERE document_id = $2",
-                datetime.utcnow(), document_id
+                "UPDATE documents SET status = 'analyzing' WHERE document_id = $1",
+                document_id
             )
         
         # Call Document Analysis Agent
@@ -562,8 +540,8 @@ async def trigger_document_analysis(document_id: str, case_id: str, s3_location:
                 # Update document status to failed
                 async with db_pool.acquire() as conn:
                     await conn.execute(
-                        "UPDATE documents SET status = 'failed', updated_at = $1 WHERE document_id = $2",
-                        datetime.utcnow(), document_id
+                        "UPDATE documents SET status = 'failed' WHERE document_id = $1",
+                        document_id
                     )
                 
     except Exception as e:
@@ -573,8 +551,8 @@ async def trigger_document_analysis(document_id: str, case_id: str, s3_location:
         try:
             async with db_pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE documents SET status = 'failed', updated_at = $1 WHERE document_id = $2",
-                    datetime.utcnow(), document_id
+                    "UPDATE documents SET status = 'failed' WHERE document_id = $1",
+                    document_id
                 )
         except Exception as db_error:
             logger.error(f"Failed to update document status: {db_error}")
@@ -618,8 +596,8 @@ async def store_document_analysis(document_id: str, request: AnalysisResultReque
             
             # Update document status to analyzed
             await conn.execute(
-                "UPDATE documents SET status = 'analyzed', updated_at = $1 WHERE document_id = $2",
-                datetime.utcnow(), document_id
+                "UPDATE documents SET status = 'analyzed' WHERE document_id = $1",
+                document_id
             )
             
             logger.info(f"Stored analysis result {analysis_id} for document {document_id}")
@@ -647,7 +625,7 @@ async def get_document_analysis(document_id: str):
                 SELECT analysis_id, document_id, case_id, workflow_id, analysis_content,
                        extracted_data, confidence_score, red_flags, recommendations,
                        analysis_status, model_used, tokens_used, analysis_cost_cents,
-                       analyzed_at, created_at, updated_at
+                       analyzed_at, created_at
                 FROM document_analysis 
                 WHERE document_id = $1
                 ORDER BY analyzed_at DESC
@@ -666,7 +644,7 @@ async def get_document_analysis(document_id: str):
                 result['red_flags'] = json.loads(result['red_flags'])
             
             # Convert timestamps to ISO format
-            for field in ['analyzed_at', 'created_at', 'updated_at']:
+            for field in ['analyzed_at', 'created_at']:
                 if result[field]:
                     result[field] = result[field].isoformat()
             
@@ -690,7 +668,7 @@ async def get_case_analysis_summary(case_id: str):
             
             # Get analysis results for all documents in the case
             analysis_rows = await conn.fetch("""
-                SELECT da.analysis_id, da.document_id, d.filename, d.document_type,
+                SELECT da.analysis_id, da.document_id, d.filename,
                        da.confidence_score, da.analysis_status, da.analyzed_at,
                        da.red_flags, da.model_used
                 FROM document_analysis da
@@ -711,7 +689,6 @@ async def get_case_analysis_summary(case_id: str):
                     "analysis_id": row['analysis_id'],
                     "document_id": row['document_id'],
                     "filename": row['filename'],
-                    "document_type": row['document_type'],
                     "confidence_score": row['confidence_score'],
                     "analysis_status": row['analysis_status'],
                     "analyzed_at": row['analyzed_at'].isoformat(),
@@ -744,8 +721,7 @@ async def get_document(document_id: str):
         async with db_pool.acquire() as conn:
             doc_row = await conn.fetchrow("""
                 SELECT document_id, case_id, filename, file_size, file_type,
-                       s3_location, s3_key, s3_etag, document_type, status,
-                       uploaded_at, created_at, updated_at
+                       s3_location, s3_key, s3_etag, status, created_at
                 FROM documents 
                 WHERE document_id = $1
             """, document_id)
@@ -756,7 +732,7 @@ async def get_document(document_id: str):
             result = dict(doc_row)
             
             # Convert timestamps to ISO format
-            for field in ['uploaded_at', 'created_at', 'updated_at']:
+            for field in ['created_at']:
                 if result[field]:
                     result[field] = result[field].isoformat()
             
