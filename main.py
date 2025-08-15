@@ -110,6 +110,8 @@ class ClientCommunication(BaseModel):
     recipient: str
     subject: Optional[str] = None
     message_content: str
+    sent_at: Optional[datetime] = None
+    resend_id: Optional[str] = None
 
 class ReasoningStep(BaseModel):
     timestamp: str
@@ -239,11 +241,11 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
             # Insert into client_communications table
             await conn.execute("""
                 INSERT INTO client_communications 
-                (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at, resend_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             request.case_id, "email", "outgoing", "sent", FROM_EMAIL, 
-            request.recipient_email, request.subject, request.body, datetime.utcnow())
+            request.recipient_email, request.subject, request.body, datetime.utcnow(), resend_id)
         
         logger.info(f"Email sent via Resend - ID: {resend_id}, To: {request.recipient_email}")
         
@@ -261,7 +263,7 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
             # Insert into client_communications table
             await conn.execute("""
                 INSERT INTO client_communications 
-                (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
+                (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
             request.case_id, "email", "outgoing", "failed", FROM_EMAIL, 
@@ -716,10 +718,10 @@ async def get_case(case_id: str):
             
             # Get last communication date from client_communications
             last_comm = await conn.fetchrow("""
-                SELECT communication_at 
+                SELECT created_at 
                 FROM client_communications 
                 WHERE case_id = $1 
-                ORDER BY communication_at DESC 
+                ORDER BY created_at DESC 
                 LIMIT 1
             """, case_id)
             
@@ -730,7 +732,7 @@ async def get_case(case_id: str):
                 "client_phone": case_row['client_phone'],
                 "status": case_row['status'],
                 "created_at": case_row['created_at'].isoformat(),
-                "last_communication_date": last_comm['communication_at'].isoformat() if last_comm else None,
+                "last_communication_date": last_comm['created_at'].isoformat() if last_comm else None,
                 "requested_documents": [
                     {
                         "id": str(doc['id']),
@@ -772,14 +774,12 @@ async def get_case_communications(case_id: str):
             # Get communication history from new table
             communications = await conn.fetch("""
                 SELECT id, channel, direction, status, opened_at, sender, recipient, 
-                       subject, message_content, communication_at
+                       subject, message_content, created_at, sent_at, resend_id
                 FROM client_communications 
                 WHERE case_id = $1 
-                ORDER BY communication_at DESC
+                ORDER BY created_at DESC
                 LIMIT 50
             """, case_id)
-            
-            # Note: email_logs table removed - using client_communications instead
             
             return {
                 "case_id": case_id,
@@ -800,10 +800,10 @@ async def get_case_communications(case_id: str):
                         "updated_at": doc['updated_at'].isoformat()
                     } for doc in requested_docs
                 ],
-                "last_communication_date": communications[0]['communication_at'].isoformat() if communications else None,
+                "last_communication_date": communications[0]['created_at'].isoformat() if communications else None,
                 "communication_summary": {
                     "total_communications": len(communications),
-                    "last_communication_date": communications[0]['communication_at'].isoformat() if communications else None
+                    "last_communication_date": communications[0]['created_at'].isoformat() if communications else None
                 },
                 "communications": [
                     {
@@ -816,7 +816,9 @@ async def get_case_communications(case_id: str):
                         "recipient": comm['recipient'],
                         "subject": comm['subject'],
                         "message_content": comm['message_content'],
-                        "communication_at": comm['communication_at'].isoformat()
+                        "created_at": comm['created_at'].isoformat(),
+                        "sent_at": comm['sent_at'].isoformat() if comm['sent_at'] else None,
+                        "resend_id": comm['resend_id']
                     } for comm in communications
                 ]
             }
@@ -835,13 +837,13 @@ async def get_pending_reminder_cases():
             # Get cases and their last communication date from the new table
             rows = await conn.fetch("""
                 SELECT c.case_id, c.client_email, c.client_name, c.client_phone, c.status,
-                       MAX(cc.communication_at) as last_communication_date
+                       MAX(cc.created_at) as last_communication_date
                 FROM cases c
                 LEFT JOIN client_communications cc ON c.case_id = cc.case_id
                 WHERE c.status = 'awaiting_documents'
                 GROUP BY c.case_id, c.client_email, c.client_name, c.client_phone, c.status
-                HAVING MAX(cc.communication_at) IS NULL OR MAX(cc.communication_at) < $1
-                ORDER BY MAX(cc.communication_at) ASC NULLS FIRST
+                HAVING MAX(cc.created_at) IS NULL OR MAX(cc.created_at) < $1
+                ORDER BY MAX(cc.created_at) ASC NULLS FIRST
                 LIMIT 20
             """, cutoff_date)
             
