@@ -16,19 +16,17 @@ from enum import Enum
 # New enums for client communications
 class CommunicationChannel(str, Enum):
     EMAIL = "email"
-    PHONE = "phone"
     SMS = "sms"
-    PORTAL = "portal"
 
 class CommunicationDirection(str, Enum):
-    INBOUND = "inbound"
-    OUTBOUND = "outbound"
+    INCOMING = "incoming"
+    OUTGOING = "outgoing"
 
 class DeliveryStatus(str, Enum):
     SENT = "sent"
     DELIVERED = "delivered" 
     FAILED = "failed"
-    PENDING = "pending"
+    OPENED = "opened"
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -244,7 +242,7 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
                 (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
-            request.case_id, "email", "outbound", "sent", FROM_EMAIL, 
+            request.case_id, "email", "outgoing", "sent", FROM_EMAIL, 
             request.recipient_email, request.subject, request.body, datetime.utcnow())
         
         logger.info(f"Email sent via Resend - ID: {resend_id}, To: {request.recipient_email}")
@@ -266,7 +264,7 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
                 (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
-            request.case_id, "email", "outbound", "failed", FROM_EMAIL, 
+            request.case_id, "email", "outgoing", "failed", FROM_EMAIL, 
             request.recipient_email, request.subject, request.body, datetime.utcnow())
         
         logger.error(f"Email sending failed: {e}")
