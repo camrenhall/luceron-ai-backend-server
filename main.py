@@ -406,7 +406,6 @@ async def trigger_document_analysis(document_id: str, case_id: str, s3_location:
             analysis_request = {
                 "case_id": case_id,
                 "document_ids": [document_id],
-                "analysis_priority": "immediate",
                 "case_context": f"Single document upload analysis for document {document_id}"
             }
             
