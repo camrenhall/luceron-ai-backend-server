@@ -399,17 +399,18 @@ async def handle_document_upload(request: S3UploadWebhookRequest, background_tas
                 
                 logger.info(f"📄 Created document record: {document_id} for case {case_id}")
                 
+                # Generate workflow ID for tracking
+                workflow_id = f"wf_upload_{uuid.uuid4().hex[:8]}"
+                workflow_ids.append(workflow_id)
+                
                 # Trigger document analysis in background
                 background_tasks.add_task(
                     trigger_document_analysis,
                     document_id,
                     case_id,
-                    file_upload.s3Location
+                    file_upload.s3Location,
+                    workflow_id
                 )
-                
-                # Generate workflow ID for tracking (will be created by analysis agent)
-                workflow_id = f"wf_upload_{uuid.uuid4().hex[:8]}"
-                workflow_ids.append(workflow_id)
         
         return DocumentUploadResponse(
             documents_created=documents_created,
@@ -500,10 +501,10 @@ async def handle_resend_webhook(webhook: ResendWebhook):
         raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
 
 
-async def trigger_document_analysis(document_id: str, case_id: str, s3_location: str):
+async def trigger_document_analysis(document_id: str, case_id: str, s3_location: str, workflow_id: str):
     """Background task to trigger document analysis agent"""
     try:
-        logger.info(f"🔄 Triggering analysis for document {document_id}")
+        logger.info(f"🔄 Triggering analysis for document {document_id} with workflow {workflow_id}")
         
         # Update document status to analyzing
         async with db_pool.acquire() as conn:
@@ -517,7 +518,8 @@ async def trigger_document_analysis(document_id: str, case_id: str, s3_location:
             analysis_request = {
                 "case_id": case_id,
                 "document_ids": [document_id],
-                "case_context": f"Single document upload analysis for document {document_id}"
+                "case_context": f"Single document upload analysis for document {document_id}",
+                "workflow_id": workflow_id
             }
             
             response = await client.post(
