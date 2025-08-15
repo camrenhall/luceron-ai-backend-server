@@ -199,7 +199,7 @@ class ResendWebhookData(BaseModel):
     bounce: Optional[ResendBounceInfo] = None
 
 class ResendWebhook(BaseModel):
-    type: str  # "email.opened", "email.failed", "email.bounced"
+    type: str  # "email.opened", "email.delivered", "email.failed", "email.bounced"
     created_at: str  # This is when event occurred (webhook timestamp)
     data: ResendWebhookData
 
