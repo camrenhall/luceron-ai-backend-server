@@ -685,6 +685,16 @@ async def create_case(request: CaseCreateRequest):
                     """,
                     request.case_id, doc.document_name, doc.description, 
                     datetime.utcnow(), datetime.utcnow())
+                
+                # Update any existing workflows that were created without a case_id
+                # and should be associated with this new case (e.g., communication workflows)
+                await conn.execute("""
+                    UPDATE workflow_states 
+                    SET case_id = $1 
+                    WHERE case_id IS NULL 
+                    AND agent_type = 'CommunicationsAgent'
+                    AND created_at >= NOW() - INTERVAL '1 hour'
+                """, request.case_id)
             
             return {
                 "case_id": request.case_id,
@@ -953,6 +963,7 @@ async def get_workflow(workflow_id: str):
     except Exception as e:
         logger.error(f"Failed to get workflow: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 
 @app.put("/api/workflows/{workflow_id}/status")
 async def update_workflow_status(workflow_id: str, request: WorkflowStatusRequest):
