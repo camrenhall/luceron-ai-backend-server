@@ -7,3 +7,4 @@ httpx
 boto3
 pillow
 pdf2image
+python-multipart
