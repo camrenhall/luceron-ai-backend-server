@@ -238,27 +238,14 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
         
         # Log to database
         async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                # Insert into email_logs (keeping for backward compatibility)
-                await conn.execute("""
-                    INSERT INTO email_logs 
-                    (message_id, case_id, recipient_email, subject, body, html_body, 
-                     email_type, status, sent_via, resend_id, metadata, sent_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                """, 
-                message_id, request.case_id, request.recipient_email, 
-                request.subject, request.body, request.html_body,
-                request.email_type, "sent", "resend", resend_id,
-                json.dumps(request.metadata), datetime.utcnow())
-                
-                # Insert into new client_communications table
-                await conn.execute("""
-                    INSERT INTO client_communications 
-                    (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                """,
-                request.case_id, "email", "outbound", "sent", FROM_EMAIL, 
-                request.recipient_email, request.subject, request.body, datetime.utcnow())
+            # Insert into client_communications table
+            await conn.execute("""
+                INSERT INTO client_communications 
+                (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+            request.case_id, "email", "outbound", "sent", FROM_EMAIL, 
+            request.recipient_email, request.subject, request.body, datetime.utcnow())
         
         logger.info(f"Email sent via Resend - ID: {resend_id}, To: {request.recipient_email}")
         
@@ -273,26 +260,14 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
     except Exception as e:
         # Log failure
         async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                # Insert into email_logs (keeping for backward compatibility)
-                await conn.execute("""
-                    INSERT INTO email_logs 
-                    (message_id, case_id, recipient_email, subject, body, 
-                     email_type, status, sent_via, error_message, sent_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                """, 
-                message_id, request.case_id, request.recipient_email, 
-                request.subject, request.body, request.email_type,
-                "failed", "resend_error", str(e), datetime.utcnow())
-                
-                # Insert into new client_communications table
-                await conn.execute("""
-                    INSERT INTO client_communications 
-                    (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                """,
-                request.case_id, "email", "outbound", "failed", FROM_EMAIL, 
-                request.recipient_email, request.subject, request.body, datetime.utcnow())
+            # Insert into client_communications table
+            await conn.execute("""
+                INSERT INTO client_communications 
+                (case_id, channel, direction, status, sender, recipient, subject, message_content, communication_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+            request.case_id, "email", "outbound", "failed", FROM_EMAIL, 
+            request.recipient_email, request.subject, request.body, datetime.utcnow())
         
         logger.error(f"Email sending failed: {e}")
         raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
@@ -711,7 +686,7 @@ async def create_case(request: CaseCreateRequest):
                 "client_email": request.client_email,
                 "client_phone": request.client_phone,
                 "status": "awaiting_documents",
-                "requested_documents": [doc.dict() for doc in request.requested_documents]
+                "requested_documents": [doc.model_dump() for doc in request.requested_documents]
             }
             
     except asyncpg.UniqueViolationError:
@@ -806,15 +781,7 @@ async def get_case_communications(case_id: str):
                 LIMIT 50
             """, case_id)
             
-            # Get email history for backward compatibility
-            email_logs = await conn.fetch("""
-                SELECT message_id, recipient_email, subject, email_type, 
-                       status, sent_via, sent_at, metadata
-                FROM email_logs 
-                WHERE case_id = $1 
-                ORDER BY sent_at DESC
-                LIMIT 50
-            """, case_id)
+            # Note: email_logs table removed - using client_communications instead
             
             return {
                 "case_id": case_id,
@@ -838,7 +805,6 @@ async def get_case_communications(case_id: str):
                 "last_communication_date": communications[0]['communication_at'].isoformat() if communications else None,
                 "communication_summary": {
                     "total_communications": len(communications),
-                    "total_emails": len(email_logs),
                     "last_communication_date": communications[0]['communication_at'].isoformat() if communications else None
                 },
                 "communications": [
@@ -854,8 +820,7 @@ async def get_case_communications(case_id: str):
                         "message_content": comm['message_content'],
                         "communication_at": comm['communication_at'].isoformat()
                     } for comm in communications
-                ],
-                "email_history": [dict(log) for log in email_logs]  # Keep for backward compatibility
+                ]
             }
             
     except Exception as e:
@@ -1015,7 +980,7 @@ async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
             
             # Parse and append new step
             chain = json.loads(current_chain) if current_chain else []
-            chain.append(step.dict())
+            chain.append(step.model_dump())
             
             # Update database
             await conn.execute(
