@@ -4,3 +4,6 @@ asyncpg
 resend
 pydantic
 httpx
+boto3
+pillow
+pdf2image

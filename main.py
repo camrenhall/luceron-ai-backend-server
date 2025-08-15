@@ -7,11 +7,17 @@ import os
 import logging
 import uuid
 import json
+import boto3
+import io
+import tempfile
+from pathlib import Path
 
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from contextlib import asynccontextmanager
 from enum import Enum
+from PIL import Image
+from pdf2image import convert_from_bytes
 
 # New enums for client communications
 class CommunicationChannel(str, Enum):
@@ -28,7 +34,7 @@ class DeliveryStatus(str, Enum):
     FAILED = "failed"
     OPENED = "opened"
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from pydantic import BaseModel, Field
 import asyncpg
 import resend
@@ -47,15 +53,31 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL")
 DOCUMENT_ANALYSIS_AGENT_URL = os.getenv("DOCUMENT_ANALYSIS_AGENT_URL")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 PORT = int(os.getenv("PORT", 8080))
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 if not RESEND_API_KEY:
     raise ValueError("RESEND_API_KEY environment variable is required")
+if not S3_BUCKET_NAME:
+    raise ValueError("S3_BUCKET_NAME environment variable is required")
+if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+    raise ValueError("AWS credentials environment variables are required")
 
 # Configure Resend
 resend.api_key = RESEND_API_KEY
+
+# Configure S3 client
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    region_name=AWS_REGION
+)
 
 # Global database pool
 db_pool = None
@@ -169,6 +191,24 @@ class DocumentUploadResponse(BaseModel):
     workflow_ids: List[str]
     message: str
 
+class ProcessedFile(BaseModel):
+    original_filename: str
+    processed_filename: str
+    file_type: str
+    file_size: int
+    s3_location: str
+    s3_key: str
+    page_number: Optional[int] = None  # For multi-page PDFs
+
+class FileUploadResponse(BaseModel):
+    case_id: str
+    total_files_processed: int
+    documents_created: int
+    processed_files: List[ProcessedFile]
+    analysis_triggered: bool
+    workflow_ids: List[str]
+    message: str
+
 class ResendTag(BaseModel):
     name: str
     value: str
@@ -221,6 +261,155 @@ async def close_database():
         await db_pool.close()
     logger.info("Database connections closed")
     
+def get_file_type(filename: str) -> str:
+    """Get file type from filename extension"""
+    return Path(filename).suffix.lower().lstrip('.')
+
+def is_supported_file_type(filename: str) -> bool:
+    """Check if file type is supported for processing"""
+    file_type = get_file_type(filename)
+    return file_type in ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'pdf']
+
+async def upload_to_s3(file_data: bytes, s3_key: str, content_type: str = "image/png") -> str:
+    """Upload file data to S3 and return the S3 location"""
+    try:
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=s3_key,
+            Body=file_data,
+            ContentType=content_type
+        )
+        s3_location = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+        return s3_location
+    except Exception as e:
+        logger.error(f"Failed to upload to S3: {e}")
+        raise
+
+def convert_tiff_to_png(tiff_data: bytes) -> bytes:
+    """Convert TIFF data to PNG format with high quality"""
+    try:
+        with Image.open(io.BytesIO(tiff_data)) as img:
+            # Convert to RGB if necessary (for TIFF with alpha channel)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                img = img.convert('RGB')
+            
+            # Save as PNG with high quality
+            png_buffer = io.BytesIO()
+            img.save(png_buffer, format='PNG', optimize=False, compress_level=1)
+            return png_buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Failed to convert TIFF to PNG: {e}")
+        raise
+
+def convert_pdf_to_pngs(pdf_data: bytes) -> List[bytes]:
+    """Convert PDF to list of PNG images (one per page) with high quality"""
+    try:
+        # Convert PDF to images with high DPI for quality
+        images = convert_from_bytes(
+            pdf_data,
+            dpi=300,  # High DPI for quality
+            fmt='PNG',
+            thread_count=1
+        )
+        
+        png_list = []
+        for img in images:
+            # Convert PIL Image to bytes
+            png_buffer = io.BytesIO()
+            img.save(png_buffer, format='PNG', optimize=False, compress_level=1)
+            png_list.append(png_buffer.getvalue())
+        
+        return png_list
+    except Exception as e:
+        logger.error(f"Failed to convert PDF to PNG: {e}")
+        raise
+
+async def process_uploaded_file(
+    file: UploadFile, 
+    case_id: str
+) -> List[ProcessedFile]:
+    """Process uploaded file and return list of processed files"""
+    try:
+        # Read file data
+        file_data = await file.read()
+        original_filename = file.filename
+        file_type = get_file_type(original_filename)
+        
+        processed_files = []
+        
+        if file_type in ['jpg', 'jpeg']:
+            # Keep as JPG
+            s3_key = f"documents/{case_id}/{uuid.uuid4().hex[:8]}_{original_filename}"
+            s3_location = await upload_to_s3(file_data, s3_key, "image/jpeg")
+            
+            processed_files.append(ProcessedFile(
+                original_filename=original_filename,
+                processed_filename=original_filename,
+                file_type="jpg",
+                file_size=len(file_data),
+                s3_location=s3_location,
+                s3_key=s3_key
+            ))
+            
+        elif file_type == 'png':
+            # Keep as PNG
+            s3_key = f"documents/{case_id}/{uuid.uuid4().hex[:8]}_{original_filename}"
+            s3_location = await upload_to_s3(file_data, s3_key, "image/png")
+            
+            processed_files.append(ProcessedFile(
+                original_filename=original_filename,
+                processed_filename=original_filename,
+                file_type="png",
+                file_size=len(file_data),
+                s3_location=s3_location,
+                s3_key=s3_key
+            ))
+            
+        elif file_type in ['tiff', 'tif']:
+            # Convert TIFF to PNG
+            png_data = convert_tiff_to_png(file_data)
+            png_filename = f"{Path(original_filename).stem}.png"
+            s3_key = f"documents/{case_id}/{uuid.uuid4().hex[:8]}_{png_filename}"
+            s3_location = await upload_to_s3(png_data, s3_key, "image/png")
+            
+            processed_files.append(ProcessedFile(
+                original_filename=original_filename,
+                processed_filename=png_filename,
+                file_type="png",
+                file_size=len(png_data),
+                s3_location=s3_location,
+                s3_key=s3_key
+            ))
+            
+        elif file_type == 'pdf':
+            # Convert PDF to multiple PNGs (one per page)
+            png_list = convert_pdf_to_pngs(file_data)
+            base_filename = Path(original_filename).stem
+            
+            for page_num, png_data in enumerate(png_list, 1):
+                png_filename = f"{base_filename}_page_{page_num}.png"
+                s3_key = f"documents/{case_id}/{uuid.uuid4().hex[:8]}_{png_filename}"
+                s3_location = await upload_to_s3(png_data, s3_key, "image/png")
+                
+                processed_files.append(ProcessedFile(
+                    original_filename=original_filename,
+                    processed_filename=png_filename,
+                    file_type="png",
+                    file_size=len(png_data),
+                    s3_location=s3_location,
+                    s3_key=s3_key,
+                    page_number=page_num
+                ))
+        
+        else:
+            raise ValueError(f"Unsupported file type: {file_type}")
+        
+        return processed_files
+        
+    except Exception as e:
+        logger.error(f"Failed to process file {original_filename}: {e}")
+        raise
+
 def parse_uploaded_timestamp(timestamp_str: str) -> datetime:
     """Parse uploaded timestamp handling timezone properly"""
     try:
@@ -341,6 +530,87 @@ async def health_check():
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Health check failed: {str(e)}")
+
+@app.post("/api/upload-documents", response_model=FileUploadResponse)
+async def upload_documents(
+    case_id: str = Form(...),
+    files: List[UploadFile] = File(...)
+):
+    """Upload and process documents for a case"""
+    
+    logger.info(f"📄 Document upload request for case: {case_id}")
+    logger.info(f"📄 Files to process: {len(files)}")
+    
+    try:
+        # Verify case exists
+        async with db_pool.acquire() as conn:
+            case_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
+                case_id
+            )
+            if not case_exists:
+                raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
+        
+        all_processed_files = []
+        documents_created = 0
+        workflow_ids = []
+        
+        async with db_pool.acquire() as conn:
+            for file in files:
+                # Validate file type
+                if not is_supported_file_type(file.filename):
+                    logger.warning(f"Unsupported file type: {file.filename}")
+                    continue
+                
+                # Process the file (convert if necessary and upload to S3)
+                processed_files = await process_uploaded_file(file, case_id)
+                
+                # Create document records for each processed file
+                for processed_file in processed_files:
+                    document_id = f"doc_{uuid.uuid4().hex[:12]}"
+                    
+                    # Insert document record
+                    await conn.execute("""
+                        INSERT INTO documents 
+                        (document_id, case_id, filename, file_size, file_type, 
+                        s3_location, s3_key, s3_etag, status)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    """,
+                    document_id, case_id, processed_file.processed_filename, 
+                    processed_file.file_size, processed_file.file_type,
+                    processed_file.s3_location, processed_file.s3_key,
+                    None, "uploaded")  # No ETag for direct uploads
+                    
+                    documents_created += 1
+                    
+                    logger.info(f"📄 Created document record: {document_id} for case {case_id}")
+                    
+                    # Generate workflow ID and trigger analysis
+                    workflow_id = f"wf_upload_{uuid.uuid4().hex[:8]}"
+                    workflow_ids.append(workflow_id)
+                    
+                    # Trigger document analysis in background
+                    # Note: Using asyncio.create_task instead of BackgroundTasks for immediate execution
+                    import asyncio
+                    asyncio.create_task(trigger_document_analysis(
+                        document_id, case_id, processed_file.s3_location, workflow_id
+                    ))
+                
+                all_processed_files.extend(processed_files)
+        
+        return FileUploadResponse(
+            case_id=case_id,
+            total_files_processed=len(files),
+            documents_created=documents_created,
+            processed_files=all_processed_files,
+            analysis_triggered=documents_created > 0,
+            workflow_ids=workflow_ids,
+            message=f"Successfully processed {len(files)} files and created {documents_created} document records"
+        )
+        
+    except Exception as e:
+        logger.error(f"Document upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload processing failed: {str(e)}")
     
 @app.post("/api/webhooks/document-uploaded", response_model=DocumentUploadResponse)
 async def handle_document_upload(request: S3UploadWebhookRequest, background_tasks: BackgroundTasks):
