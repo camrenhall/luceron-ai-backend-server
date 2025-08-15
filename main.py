@@ -917,8 +917,7 @@ async def create_workflow(request: WorkflowCreateRequest):
                 "status": request.status.value,
                 "initial_prompt": request.initial_prompt,
                 "reasoning_chain": [],
-                "created_at": row['created_at'].isoformat() if row['created_at'] else None,
-                "updated_at": row['updated_at'].isoformat() if row['updated_at'] else None
+                "created_at": row['created_at'].isoformat() if row['created_at'] else None
             }
             
     except asyncpg.UniqueViolationError:
@@ -948,8 +947,7 @@ async def get_workflow(workflow_id: str):
                 "status": row['status'],
                 "initial_prompt": row['initial_prompt'],
                 "reasoning_chain": reasoning_chain,
-                "created_at": row['created_at'].isoformat(),
-                "updated_at": row['updated_at'].isoformat()
+                "created_at": row['created_at'].isoformat()
             }
             
     except Exception as e:
@@ -962,7 +960,7 @@ async def update_workflow_status(workflow_id: str, request: WorkflowStatusReques
     try:
         async with db_pool.acquire() as conn:
             result = await conn.execute(
-                "UPDATE workflow_states SET status = $1, updated_at = now() WHERE workflow_id = $2",
+                "UPDATE workflow_states SET status = $1 WHERE workflow_id = $2",
                 request.status.value, workflow_id
             )
             
@@ -995,7 +993,7 @@ async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
             
             # Update database
             await conn.execute(
-                "UPDATE workflow_states SET reasoning_chain = $1, updated_at = now() WHERE workflow_id = $2",
+                "UPDATE workflow_states SET reasoning_chain = $1 WHERE workflow_id = $2",
                 json.dumps(chain), workflow_id
             )
             
