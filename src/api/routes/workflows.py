@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 @router.post("")
 async def create_workflow(request: WorkflowCreateRequest):
     """Create a new workflow"""
+    logger.info(f"POST workflow request received: agent_type='{request.agent_type}', case_id='{request.case_id}', status='{request.status.value}'")
     db_pool = get_db_pool()
     
     try:
@@ -30,6 +31,8 @@ async def create_workflow(request: WorkflowCreateRequest):
             """,
             request.agent_type, request.case_id, request.status.value,
             request.initial_prompt, json.dumps([]))
+            
+            logger.info(f"Created workflow with database-generated UUID: '{row['workflow_id']}'")
             
             return {
                 "workflow_id": str(row['workflow_id']),
@@ -50,6 +53,7 @@ async def create_workflow(request: WorkflowCreateRequest):
 @router.get("/{workflow_id}")
 async def get_workflow(workflow_id: str):
     """Get workflow by ID"""
+    logger.info(f"GET workflow request received for workflow_id: '{workflow_id}'")
     db_pool = get_db_pool()
     
     # Validate UUID format
