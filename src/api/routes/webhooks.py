@@ -2,100 +2,15 @@
 Webhook API routes
 """
 
-import uuid
 import logging
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 
-from models.webhook import S3UploadWebhookRequest, ResendWebhook
-from models.document import DocumentUploadResponse
-from services.document_analysis import trigger_document_analysis
+from models.webhook import ResendWebhook
 from utils.helpers import parse_uploaded_timestamp
 from database.connection import get_db_pool
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-@router.post("/document-uploaded", response_model=DocumentUploadResponse)
-async def handle_document_upload(request: S3UploadWebhookRequest, background_tasks: BackgroundTasks):
-    """Handle S3 document upload webhook and trigger analysis"""
-    db_pool = get_db_pool()
-    
-    logger.info(f"📄 Document upload webhook received: {request.event}")
-    logger.info(f"📄 Files uploaded: {len(request.files)}")
-    
-    documents_created = 0
-    workflow_ids = []
-    
-    try:
-        async with db_pool.acquire() as conn:
-            for file_upload in request.files:
-                if file_upload.status != "success":
-                    logger.warning(f"Skipping failed upload: {file_upload.fileName}")
-                    continue
-                
-                # Extract client email from metadata
-                client_email = request.metadata.get("clientEmail")
-                if not client_email:
-                    logger.error("❌ No clientEmail in webhook metadata")
-                    raise HTTPException(status_code=400, detail="Missing clientEmail in webhook metadata")
-                
-                # Find case by client email
-                case_row = await conn.fetchrow(
-                    "SELECT case_id FROM cases WHERE client_email = $1 AND status = 'awaiting_documents'",
-                    client_email
-                )
-                
-                if not case_row:
-                    logger.error(f"❌ CRITICAL: No active case found for client email: {client_email}")
-                    logger.error(f"❌ Document upload failed - client {client_email} does not have an active case")
-                    raise HTTPException(
-                        status_code=404, 
-                        detail=f"No active case found for client email: {client_email}. Please ensure a case exists with status 'awaiting_documents'."
-                    )
-                
-                case_id = case_row['case_id']
-                
-                # Generate document ID
-                document_id = f"doc_{uuid.uuid4().hex[:12]}"
-                
-                # Insert document record
-                await conn.execute("""
-                    INSERT INTO documents 
-                    (document_id, case_id, filename, file_size, file_type, 
-                    s3_location, s3_key, s3_etag, status)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                """,
-                document_id, case_id, file_upload.fileName, file_upload.fileSize,
-                file_upload.fileType, file_upload.s3Location, file_upload.s3Key,
-                file_upload.s3ETag, "uploaded")
-                
-                documents_created += 1
-                
-                logger.info(f"📄 Created document record: {document_id} for case {case_id}")
-                
-                # Generate workflow ID for tracking
-                workflow_id = f"wf_upload_{uuid.uuid4().hex[:8]}"
-                workflow_ids.append(workflow_id)
-                
-                # Trigger document analysis in background
-                background_tasks.add_task(
-                    trigger_document_analysis,
-                    document_id,
-                    case_id,
-                    file_upload.s3Location,
-                    workflow_id
-                )
-        
-        return DocumentUploadResponse(
-            documents_created=documents_created,
-            analysis_triggered=documents_created > 0,
-            workflow_ids=workflow_ids,
-            message=f"Successfully processed {documents_created} document uploads"
-        )
-        
-    except Exception as e:
-        logger.error(f"Document upload webhook failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
 
 @router.post("/resend")
 async def handle_resend_webhook(webhook: ResendWebhook):

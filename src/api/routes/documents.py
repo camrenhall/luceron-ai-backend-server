@@ -3,100 +3,15 @@ Document-related API routes
 """
 
 import uuid
-import asyncio
 import logging
-from typing import List
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException
 
-from models.document import FileUploadResponse, AnalysisResultRequest, AnalysisResultResponse
-from services.file_processor import is_supported_file_type, process_uploaded_file
-from services.document_analysis import trigger_document_analysis
+from models.document import AnalysisResultRequest, AnalysisResultResponse
 from database.connection import get_db_pool
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-@router.post("/upload-documents", response_model=FileUploadResponse)
-async def upload_documents(
-    case_id: str = Form(...),
-    files: List[UploadFile] = File(...)
-):
-    """Upload and process documents for a case"""
-    db_pool = get_db_pool()
-    
-    logger.info(f"📄 Document upload request for case: {case_id}")
-    logger.info(f"📄 Files to process: {len(files)}")
-    
-    try:
-        # Verify case exists
-        async with db_pool.acquire() as conn:
-            case_exists = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
-                case_id
-            )
-            if not case_exists:
-                raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
-        
-        all_processed_files = []
-        documents_created = 0
-        workflow_ids = []
-        
-        async with db_pool.acquire() as conn:
-            for file in files:
-                # Validate file type
-                if not is_supported_file_type(file.filename):
-                    logger.warning(f"Unsupported file type: {file.filename}")
-                    continue
-                
-                # Process the file (convert if necessary and upload to S3)
-                processed_files = await process_uploaded_file(file, case_id)
-                
-                # Create document records for each processed file
-                for processed_file in processed_files:
-                    document_id = f"doc_{uuid.uuid4().hex[:12]}"
-                    
-                    # Insert document record
-                    await conn.execute("""
-                        INSERT INTO documents 
-                        (document_id, case_id, filename, file_size, file_type, 
-                        s3_location, s3_key, s3_etag, status)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                    """,
-                    document_id, case_id, processed_file.processed_filename, 
-                    processed_file.file_size, processed_file.file_type,
-                    processed_file.s3_location, processed_file.s3_key,
-                    None, "uploaded")  # No ETag for direct uploads
-                    
-                    documents_created += 1
-                    
-                    logger.info(f"📄 Created document record: {document_id} for case {case_id}")
-                    
-                    # Generate workflow ID and trigger analysis
-                    workflow_id = f"wf_upload_{uuid.uuid4().hex[:8]}"
-                    workflow_ids.append(workflow_id)
-                    
-                    # Trigger document analysis in background
-                    # Note: Using asyncio.create_task instead of BackgroundTasks for immediate execution
-                    asyncio.create_task(trigger_document_analysis(
-                        document_id, case_id, processed_file.s3_location, workflow_id
-                    ))
-                
-                all_processed_files.extend(processed_files)
-        
-        return FileUploadResponse(
-            case_id=case_id,
-            total_files_processed=len(files),
-            documents_created=documents_created,
-            processed_files=all_processed_files,
-            analysis_triggered=documents_created > 0,
-            workflow_ids=workflow_ids,
-            message=f"Successfully processed {len(files)} files and created {documents_created} document records"
-        )
-        
-    except Exception as e:
-        logger.error(f"Document upload failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Upload processing failed: {str(e)}")
 
 @router.post("/{document_id}/analysis", response_model=AnalysisResultResponse)
 async def store_document_analysis(document_id: str, request: AnalysisResultRequest):
