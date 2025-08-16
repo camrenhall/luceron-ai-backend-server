@@ -2,7 +2,6 @@
 Email service using Resend API
 """
 
-import uuid
 import logging
 from datetime import datetime
 import resend
@@ -16,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
     """Send email via Resend API"""
-    message_id = f"msg_{uuid.uuid4().hex[:12]}"
     db_pool = get_db_pool()
     
     try:
@@ -38,13 +36,14 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
         else:
             resend_id = None
         
-        # Log to database
+        # Log to database and get the generated UUID
         async with db_pool.acquire() as conn:
-            # Insert into client_communications table
-            await conn.execute("""
+            # Insert into client_communications table and get the generated id
+            comm_id = await conn.fetchval("""
                 INSERT INTO client_communications 
                 (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at, resend_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING id
             """,
             request.case_id, "email", "outgoing", "sent", FROM_EMAIL, 
             request.recipient_email, request.subject, request.body, datetime.utcnow(), resend_id)
@@ -52,7 +51,7 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
         logger.info(f"Email sent via Resend - ID: {resend_id}, To: {request.recipient_email}")
         
         return EmailResponse(
-            message_id=message_id,
+            message_id=str(comm_id),
             status="sent",
             recipient=request.recipient_email,
             case_id=request.case_id,
@@ -62,11 +61,12 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
     except Exception as e:
         # Log failure
         async with db_pool.acquire() as conn:
-            # Insert into client_communications table
-            await conn.execute("""
+            # Insert into client_communications table and get the generated id
+            await conn.fetchval("""
                 INSERT INTO client_communications 
                 (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING id
             """,
             request.case_id, "email", "outgoing", "failed", FROM_EMAIL, 
             request.recipient_email, request.subject, request.body, datetime.utcnow())

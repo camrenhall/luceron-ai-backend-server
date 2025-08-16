@@ -14,7 +14,6 @@ class ReasoningStep(BaseModel):
     action_output: Optional[str] = None
 
 class WorkflowCreateRequest(BaseModel):
-    workflow_id: str
     agent_type: str = "CommunicationsAgent"
     case_id: Optional[str] = None
     status: WorkflowStatus

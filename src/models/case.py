@@ -17,7 +17,6 @@ class RequestedDocument(BaseModel):
     description: Optional[str] = None
 
 class CaseCreateRequest(BaseModel):
-    case_id: str
     client_name: str
     client_email: str
     client_phone: Optional[str] = None

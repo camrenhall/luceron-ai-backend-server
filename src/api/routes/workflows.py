@@ -20,21 +20,18 @@ async def create_workflow(request: WorkflowCreateRequest):
     
     try:
         async with db_pool.acquire() as conn:
-            await conn.execute("""
+            # Insert workflow and get the generated UUID
+            row = await conn.fetchrow("""
                 INSERT INTO workflow_states 
-                (workflow_id, agent_type, case_id, status, initial_prompt, reasoning_chain)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                (agent_type, case_id, status, initial_prompt, reasoning_chain)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING workflow_id, created_at
             """,
-            request.workflow_id, request.agent_type, request.case_id, request.status.value,
+            request.agent_type, request.case_id, request.status.value,
             request.initial_prompt, json.dumps([]))
             
-            # Fetch the created workflow with auto-generated timestamps
-            row = await conn.fetchrow(
-                "SELECT * FROM workflow_states WHERE workflow_id = $1", request.workflow_id
-            )
-            
             return {
-                "workflow_id": request.workflow_id,
+                "workflow_id": str(row['workflow_id']),
                 "agent_type": request.agent_type,
                 "case_id": request.case_id,
                 "status": request.status.value,

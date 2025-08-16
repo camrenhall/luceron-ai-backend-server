@@ -2,7 +2,6 @@
 Document-related API routes
 """
 
-import uuid
 import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
@@ -16,7 +15,6 @@ logger = logging.getLogger(__name__)
 @router.post("/{document_id}/analysis", response_model=AnalysisResultResponse)
 async def store_document_analysis(document_id: str, request: AnalysisResultRequest):
     """Store document analysis results"""
-    analysis_id = f"ana_{uuid.uuid4().hex[:12]}"
     db_pool = get_db_pool()
     
     try:
@@ -37,14 +35,15 @@ async def store_document_analysis(document_id: str, request: AnalysisResultReque
             if not case_exists:
                 raise HTTPException(status_code=404, detail="Case not found")
             
-            # Insert analysis result
-            await conn.execute("""
+            # Insert analysis result and get the generated UUID
+            analysis_id = await conn.fetchval("""
                 INSERT INTO document_analysis 
-                (analysis_id, document_id, case_id, workflow_id, analysis_content, 
+                (document_id, case_id, workflow_id, analysis_content, 
                  analysis_status, model_used, tokens_used, analyzed_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING analysis_id
             """, 
-            analysis_id, document_id, request.case_id, request.workflow_id,
+            document_id, request.case_id, request.workflow_id,
             request.analysis_content, request.analysis_status, request.model_used,
             request.tokens_used, datetime.utcnow())
             
@@ -57,7 +56,7 @@ async def store_document_analysis(document_id: str, request: AnalysisResultReque
             logger.info(f"Stored analysis result {analysis_id} for document {document_id}")
             
             return AnalysisResultResponse(
-                analysis_id=analysis_id,
+                analysis_id=str(analysis_id),
                 document_id=document_id,
                 case_id=request.case_id,
                 status="stored",

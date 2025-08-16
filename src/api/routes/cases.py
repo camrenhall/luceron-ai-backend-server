@@ -21,22 +21,30 @@ async def create_case(request: CaseCreateRequest):
     try:
         async with db_pool.acquire() as conn:
             async with conn.transaction():
-                # Create the case
-                await conn.execute("""
-                    INSERT INTO cases (case_id, client_name, client_email, client_phone, status, created_at)
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                # Create the case and get the generated UUID
+                case_id = await conn.fetchval("""
+                    INSERT INTO cases (client_name, client_email, client_phone, status, created_at)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING case_id
                 """, 
-                request.case_id, request.client_name, request.client_email, 
+                request.client_name, request.client_email, 
                 request.client_phone, "awaiting_documents", datetime.utcnow())
                 
-                # Insert requested documents
+                # Insert requested documents with returned UUIDs
+                requested_doc_ids = []
                 for doc in request.requested_documents:
-                    await conn.execute("""
+                    doc_id = await conn.fetchval("""
                         INSERT INTO requested_documents (case_id, document_name, description, requested_at, updated_at)
                         VALUES ($1, $2, $3, $4, $5)
+                        RETURNING id
                     """,
-                    request.case_id, doc.document_name, doc.description, 
+                    case_id, doc.document_name, doc.description, 
                     datetime.utcnow(), datetime.utcnow())
+                    requested_doc_ids.append({
+                        "id": str(doc_id),
+                        "document_name": doc.document_name,
+                        "description": doc.description
+                    })
                 
                 # Update any existing workflows that were created without a case_id
                 # and should be associated with this new case (e.g., communication workflows)
@@ -46,15 +54,15 @@ async def create_case(request: CaseCreateRequest):
                     WHERE case_id IS NULL 
                     AND agent_type = 'CommunicationsAgent'
                     AND created_at >= NOW() - INTERVAL '1 hour'
-                """, request.case_id)
+                """, case_id)
             
             return {
-                "case_id": request.case_id,
+                "case_id": str(case_id),
                 "client_name": request.client_name,
                 "client_email": request.client_email,
                 "client_phone": request.client_phone,
                 "status": "awaiting_documents",
-                "requested_documents": [doc.model_dump() for doc in request.requested_documents]
+                "requested_documents": requested_doc_ids
             }
             
     except asyncpg.UniqueViolationError:
