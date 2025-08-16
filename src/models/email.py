@@ -5,7 +5,7 @@ Email and communication-related Pydantic models
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
-from .enums import CommunicationChannel, CommunicationDirection, DeliveryStatus
+from models.enums import CommunicationChannel, CommunicationDirection, DeliveryStatus
 
 class EmailRequest(BaseModel):
     recipient_email: str

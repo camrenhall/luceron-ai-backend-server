@@ -4,7 +4,7 @@ Workflow-related Pydantic models
 
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
-from .enums import WorkflowStatus
+from models.enums import WorkflowStatus
 
 class ReasoningStep(BaseModel):
     timestamp: str

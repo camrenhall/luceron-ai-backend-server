@@ -1,54 +1,23 @@
 """
-Production Backend API Server
-Core functionality: Cases, Workflows, Email via Resend
+Entry point for the Legal Communications Backend
 """
 
+import sys
+import os
 import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
-from config.settings import PORT, ALLOWED_ORIGINS
-from database.connection import init_database, close_database
-from api.routes import health, documents, cases, emails, workflows, webhooks
+# Add src directory to Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+# Import the FastAPI application
+from src.app import app
+from src.config.settings import PORT
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
-    await init_database()
-    yield
-    await close_database()
-
-# FastAPI app initialization
-app = FastAPI(
-    title="Legal Communications Backend",
-    description="Backend API for case management and email communications", 
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
-
-# Include API routes
-app.include_router(health.router, tags=["Health"])
-app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
-app.include_router(cases.router, prefix="/api/cases", tags=["Cases"])
-app.include_router(emails.router, prefix="/api", tags=["Emails"])
-app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
-app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
-
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Starting backend server on port {PORT}")
+    logger.info(f"Starting Legal Communications Backend on port {PORT}")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
