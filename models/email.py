@@ -2,7 +2,7 @@
 Email and communication-related Pydantic models
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 from .enums import CommunicationChannel, CommunicationDirection, DeliveryStatus
@@ -14,7 +14,7 @@ class EmailRequest(BaseModel):
     html_body: Optional[str] = None
     case_id: str
     email_type: str = "custom"
-    metadata: Optional[dict] = {}
+    metadata: Optional[Dict[str, Any]] = {}
 
 class EmailResponse(BaseModel):
     message_id: str

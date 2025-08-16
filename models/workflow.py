@@ -2,7 +2,7 @@
 Workflow-related Pydantic models
 """
 
-from typing import Optional, dict
+from typing import Optional, Dict, Any
 from pydantic import BaseModel
 from .enums import WorkflowStatus
 
@@ -10,7 +10,7 @@ class ReasoningStep(BaseModel):
     timestamp: str
     thought: str
     action: Optional[str] = None
-    action_input: Optional[dict] = None
+    action_input: Optional[Dict[str, Any]] = None
     action_output: Optional[str] = None
 
 class WorkflowCreateRequest(BaseModel):

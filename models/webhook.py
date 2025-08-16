@@ -2,7 +2,7 @@
 Webhook-related Pydantic models
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 class S3UploadFile(BaseModel):
@@ -18,9 +18,9 @@ class S3UploadFile(BaseModel):
 class S3UploadWebhookRequest(BaseModel):
     event: str
     timestamp: str
-    summary: dict
+    summary: Dict[str, Any]
     files: List[S3UploadFile]
-    metadata: dict
+    metadata: Dict[str, Any]
 
 class ResendTag(BaseModel):
     name: str
