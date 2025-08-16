@@ -43,7 +43,7 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
                 INSERT INTO client_communications 
                 (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at, resend_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                RETURNING id
+                RETURNING communication_id
             """,
             request.case_id, "email", "outgoing", "sent", FROM_EMAIL, 
             request.recipient_email, request.subject, request.body, datetime.utcnow(), resend_id)

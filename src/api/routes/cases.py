@@ -36,12 +36,12 @@ async def create_case(request: CaseCreateRequest):
                     doc_id = await conn.fetchval("""
                         INSERT INTO requested_documents (case_id, document_name, description, requested_at, updated_at)
                         VALUES ($1, $2, $3, $4, $5)
-                        RETURNING id
+                        RETURNING requested_doc_id
                     """,
                     case_id, doc.document_name, doc.description, 
                     datetime.utcnow(), datetime.utcnow())
                     requested_doc_ids.append({
-                        "id": str(doc_id),
+                        "requested_doc_id": str(doc_id),
                         "document_name": doc.document_name,
                         "description": doc.description
                     })
@@ -87,7 +87,7 @@ async def get_case(case_id: str):
             
             # Get requested documents for this case
             requested_docs = await conn.fetch("""
-                SELECT id, document_name, description, is_completed, completed_at, 
+                SELECT requested_doc_id, document_name, description, is_completed, completed_at, 
                        is_flagged_for_review, notes, requested_at, updated_at
                 FROM requested_documents 
                 WHERE case_id = $1 
@@ -113,7 +113,7 @@ async def get_case(case_id: str):
                 "last_communication_date": last_comm['created_at'].isoformat() if last_comm else None,
                 "requested_documents": [
                     {
-                        "id": str(doc['id']),
+                        "requested_doc_id": str(doc['requested_doc_id']),
                         "document_name": doc['document_name'],
                         "description": doc['description'],
                         "is_completed": doc['is_completed'],
@@ -144,7 +144,7 @@ async def get_case_communications(case_id: str):
             
             # Get requested documents for this case
             requested_docs = await conn.fetch("""
-                SELECT id, document_name, description, is_completed, completed_at, 
+                SELECT requested_doc_id, document_name, description, is_completed, completed_at, 
                        is_flagged_for_review, notes, requested_at, updated_at
                 FROM requested_documents 
                 WHERE case_id = $1 
@@ -153,7 +153,7 @@ async def get_case_communications(case_id: str):
             
             # Get communication history from new table
             communications = await conn.fetch("""
-                SELECT id, channel, direction, status, opened_at, sender, recipient, 
+                SELECT communication_id, channel, direction, status, opened_at, sender, recipient, 
                        subject, message_content, created_at, sent_at, resend_id
                 FROM client_communications 
                 WHERE case_id = $1 
@@ -169,7 +169,7 @@ async def get_case_communications(case_id: str):
                 "case_status": case_row['status'],
                 "requested_documents": [
                     {
-                        "id": str(doc['id']),
+                        "requested_doc_id": str(doc['requested_doc_id']),
                         "document_name": doc['document_name'],
                         "description": doc['description'],
                         "is_completed": doc['is_completed'],
@@ -187,7 +187,7 @@ async def get_case_communications(case_id: str):
                 },
                 "communications": [
                     {
-                        "id": str(comm['id']),
+                        "communication_id": str(comm['communication_id']),
                         "channel": comm['channel'],
                         "direction": comm['direction'],
                         "status": comm['status'],
@@ -221,7 +221,7 @@ async def get_case_analysis_summary(case_id: str):
             
             # Get analysis results for all documents in the case
             analysis_rows = await conn.fetch("""
-                SELECT da.analysis_id, da.document_id, d.filename,
+                SELECT da.analysis_id, da.document_id, d.original_file_name,
                        da.analysis_status, da.analyzed_at, da.model_used
                 FROM document_analysis da
                 JOIN documents d ON da.document_id = d.document_id
@@ -235,7 +235,7 @@ async def get_case_analysis_summary(case_id: str):
                 analysis_summary.append({
                     "analysis_id": row['analysis_id'],
                     "document_id": row['document_id'],
-                    "filename": row['filename'],
+                    "filename": row['original_file_name'],
                     "analysis_status": row['analysis_status'],
                     "analyzed_at": row['analyzed_at'].isoformat(),
                     "model_used": row['model_used']

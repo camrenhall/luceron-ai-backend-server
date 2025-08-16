@@ -111,8 +111,9 @@ async def get_document(document_id: str):
     try:
         async with db_pool.acquire() as conn:
             doc_row = await conn.fetchrow("""
-                SELECT document_id, case_id, filename, file_size, file_type,
-                       s3_location, s3_key, s3_etag, status, created_at
+                SELECT document_id, case_id, original_file_name, original_file_size, original_file_type,
+                       original_s3_location, original_s3_key, status, created_at,
+                       processed_file_name, processed_file_size, processed_s3_location, processed_s3_key, batch_id
                 FROM documents 
                 WHERE document_id = $1
             """, document_id)
