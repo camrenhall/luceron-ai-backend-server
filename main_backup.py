@@ -1,0 +1,1384 @@
+"""
+Production Backend API Server
+Core functionality: Cases, Workflows, Email via Resend
+"""
+
+import os
+import logging
+import uuid
+import json
+import boto3
+import io
+import tempfile
+from pathlib import Path
+
+from datetime import datetime, timedelta
+from typing import List, Optional, Tuple
+from contextlib import asynccontextmanager
+from enum import Enum
+from PIL import Image
+from pdf2image import convert_from_bytes
+
+# New enums for client communications
+class CommunicationChannel(str, Enum):
+    EMAIL = "email"
+    SMS = "sms"
+
+class CommunicationDirection(str, Enum):
+    INCOMING = "incoming"
+    OUTGOING = "outgoing"
+
+class DeliveryStatus(str, Enum):
+    SENT = "sent"
+    DELIVERED = "delivered" 
+    FAILED = "failed"
+    OPENED = "opened"
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
+from pydantic import BaseModel, Field
+import asyncpg
+import resend
+import httpx
+from datetime import datetime, timezone
+
+from fastapi.middleware.cors import CORSMiddleware
+
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Environment configuration
+DATABASE_URL = os.getenv("DATABASE_URL")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+FROM_EMAIL = os.getenv("FROM_EMAIL")
+DOCUMENT_ANALYSIS_AGENT_URL = os.getenv("DOCUMENT_ANALYSIS_AGENT_URL")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+PORT = int(os.getenv("PORT", 8080))
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
+if not RESEND_API_KEY:
+    raise ValueError("RESEND_API_KEY environment variable is required")
+if not S3_BUCKET_NAME:
+    raise ValueError("S3_BUCKET_NAME environment variable is required")
+if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+    raise ValueError("AWS credentials environment variables are required")
+
+# Configure Resend
+resend.api_key = RESEND_API_KEY
+
+# Configure S3 client
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    region_name=AWS_REGION
+)
+
+# Global database pool
+db_pool = None
+
+# Models
+class WorkflowStatus(str, Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+class CaseData(BaseModel):
+    case_id: str
+    client_email: str
+    client_name: str
+    client_phone: Optional[str] = None
+    status: str
+
+class RequestedDocument(BaseModel):
+    document_name: str
+    description: Optional[str] = None
+
+class CaseCreateRequest(BaseModel):
+    case_id: str
+    client_name: str
+    client_email: str
+    client_phone: Optional[str] = None
+    requested_documents: List[RequestedDocument]
+
+class EmailRequest(BaseModel):
+    recipient_email: str
+    subject: str
+    body: str
+    html_body: Optional[str] = None
+    case_id: str
+    email_type: str = "custom"
+    metadata: Optional[dict] = {}
+
+class EmailResponse(BaseModel):
+    message_id: str
+    status: str
+    recipient: str
+    case_id: str
+    sent_via: str
+
+class ClientCommunication(BaseModel):
+    case_id: str
+    channel: CommunicationChannel
+    direction: CommunicationDirection
+    status: DeliveryStatus
+    sender: str
+    recipient: str
+    subject: Optional[str] = None
+    message_content: str
+    sent_at: Optional[datetime] = None
+    resend_id: Optional[str] = None
+
+class ReasoningStep(BaseModel):
+    timestamp: str
+    thought: str
+    action: Optional[str] = None
+    action_input: Optional[dict] = None
+    action_output: Optional[str] = None
+
+class WorkflowCreateRequest(BaseModel):
+    workflow_id: str
+    agent_type: str = "CommunicationsAgent"
+    case_id: Optional[str] = None
+    status: WorkflowStatus
+    initial_prompt: str
+
+class WorkflowStatusRequest(BaseModel):
+    status: WorkflowStatus
+    
+class AnalysisResultRequest(BaseModel):
+    document_id: str
+    case_id: str
+    workflow_id: Optional[str] = None
+    analysis_content: str
+    model_used: str = "o3"
+    tokens_used: Optional[int] = None
+    analysis_status: str = "completed"
+
+class AnalysisResultResponse(BaseModel):
+    analysis_id: str
+    document_id: str
+    case_id: str
+    status: str
+    analyzed_at: str
+
+class S3UploadFile(BaseModel):
+    fileName: str
+    fileSize: int
+    fileType: str
+    s3Location: str
+    s3Key: str
+    s3ETag: Optional[str] = None
+    uploadedAt: str
+    status: str = "success"
+
+class S3UploadWebhookRequest(BaseModel):
+    event: str
+    timestamp: str
+    summary: dict
+    files: List[S3UploadFile]
+    metadata: dict
+
+class DocumentUploadResponse(BaseModel):
+    documents_created: int
+    analysis_triggered: bool
+    workflow_ids: List[str]
+    message: str
+
+class ProcessedFile(BaseModel):
+    original_filename: str
+    processed_filename: str
+    file_type: str
+    file_size: int
+    s3_location: str
+    s3_key: str
+    page_number: Optional[int] = None  # For multi-page PDFs
+
+class FileUploadResponse(BaseModel):
+    case_id: str
+    total_files_processed: int
+    documents_created: int
+    processed_files: List[ProcessedFile]
+    analysis_triggered: bool
+    workflow_ids: List[str]
+    message: str
+
+class ResendTag(BaseModel):
+    name: str
+    value: str
+
+class ResendFailedInfo(BaseModel):
+    reason: str
+
+class ResendBounceInfo(BaseModel):
+    message: str
+    subType: str
+    type: str
+
+class ResendWebhookData(BaseModel):
+    broadcast_id: Optional[str] = None
+    created_at: str  # This is when email was created (NOT when event occurred)
+    email_id: str
+    from_: str = Field(alias="from")
+    to: List[str]
+    subject: str
+    tags: Optional[List[ResendTag]] = []
+    # Optional fields for different event types
+    failed: Optional[ResendFailedInfo] = None
+    bounce: Optional[ResendBounceInfo] = None
+
+class ResendWebhook(BaseModel):
+    type: str  # "email.opened", "email.delivered", "email.failed", "email.bounced"
+    created_at: str  # This is when event occurred (webhook timestamp)
+    data: ResendWebhookData
+
+# Database initialization
+async def init_database():
+    global db_pool
+    db_pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        min_size=2,
+        max_size=10,
+        command_timeout=60,
+        statement_cache_size=0  # Fix for pgbouncer compatibility
+    )
+    
+    # Test connection
+    async with db_pool.acquire() as conn:
+        await conn.fetchval("SELECT 1")
+    
+    logger.info("Database initialized successfully")
+
+async def close_database():
+    global db_pool
+    if db_pool:
+        await db_pool.close()
+    logger.info("Database connections closed")
+    
+def get_file_type(filename: str) -> str:
+    """Get file type from filename extension"""
+    return Path(filename).suffix.lower().lstrip('.')
+
+def is_supported_file_type(filename: str) -> bool:
+    """Check if file type is supported for processing"""
+    file_type = get_file_type(filename)
+    return file_type in ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'pdf']
+
+async def upload_to_s3(file_data: bytes, s3_key: str, content_type: str = "image/png") -> str:
+    """Upload file data to S3 and return the S3 location"""
+    try:
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=s3_key,
+            Body=file_data,
+            ContentType=content_type
+        )
+        s3_location = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+        return s3_location
+    except Exception as e:
+        logger.error(f"Failed to upload to S3: {e}")
+        raise
+
+def convert_tiff_to_png(tiff_data: bytes) -> bytes:
+    """Convert TIFF data to PNG format with high quality"""
+    try:
+        with Image.open(io.BytesIO(tiff_data)) as img:
+            # Convert to RGB if necessary (for TIFF with alpha channel)
+            if img.mode in ('RGBA', 'LA', 'P'):
+                img = img.convert('RGB')
+            
+            # Save as PNG with high quality
+            png_buffer = io.BytesIO()
+            img.save(png_buffer, format='PNG', optimize=False, compress_level=1)
+            return png_buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Failed to convert TIFF to PNG: {e}")
+        raise
+
+def convert_pdf_to_pngs(pdf_data: bytes) -> List[bytes]:
+    """Convert PDF to list of PNG images (one per page) with high quality"""
+    try:
+        # Convert PDF to images with high DPI for quality
+        # Try default first, then with explicit poppler path if needed
+        try:
+            images = convert_from_bytes(
+                pdf_data,
+                dpi=300,  # High DPI for quality
+                fmt='PNG',
+                thread_count=1
+            )
+        except Exception as poppler_error:
+            # Try with explicit poppler path (common Docker/Linux locations)
+            poppler_paths = ['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin']
+            for poppler_path in poppler_paths:
+                try:
+                    images = convert_from_bytes(
+                        pdf_data,
+                        dpi=300,
+                        fmt='PNG', 
+                        thread_count=1,
+                        poppler_path=poppler_path
+                    )
+                    break
+                except:
+                    continue
+            else:
+                # If all paths fail, raise the original error
+                raise poppler_error
+        
+        png_list = []
+        for img in images:
+            # Convert PIL Image to bytes
+            png_buffer = io.BytesIO()
+            img.save(png_buffer, format='PNG', optimize=False, compress_level=1)
+            png_list.append(png_buffer.getvalue())
+        
+        return png_list
+    except Exception as e:
+        logger.error(f"Failed to convert PDF to PNG: {e}")
+        raise
+
+async def process_uploaded_file(
+    file: UploadFile, 
+    case_id: str
+) -> List[ProcessedFile]:
+    """Process uploaded file and return list of processed files"""
+    try:
+        # Read file data
+        file_data = await file.read()
+        original_filename = file.filename
+        file_type = get_file_type(original_filename)
+        
+        processed_files = []
+        
+        if file_type in ['jpg', 'jpeg']:
+            # Keep as JPG
+            s3_key = f"documents/{case_id}/{uuid.uuid4().hex[:8]}_{original_filename}"
+            s3_location = await upload_to_s3(file_data, s3_key, "image/jpeg")
+            
+            processed_files.append(ProcessedFile(
+                original_filename=original_filename,
+                processed_filename=original_filename,
+                file_type="jpg",
+                file_size=len(file_data),
+                s3_location=s3_location,
+                s3_key=s3_key
+            ))
+            
+        elif file_type == 'png':
+            # Keep as PNG
+            s3_key = f"documents/{case_id}/{uuid.uuid4().hex[:8]}_{original_filename}"
+            s3_location = await upload_to_s3(file_data, s3_key, "image/png")
+            
+            processed_files.append(ProcessedFile(
+                original_filename=original_filename,
+                processed_filename=original_filename,
+                file_type="png",
+                file_size=len(file_data),
+                s3_location=s3_location,
+                s3_key=s3_key
+            ))
+            
+        elif file_type in ['tiff', 'tif']:
+            # Convert TIFF to PNG
+            png_data = convert_tiff_to_png(file_data)
+            png_filename = f"{Path(original_filename).stem}.png"
+            s3_key = f"documents/{case_id}/{uuid.uuid4().hex[:8]}_{png_filename}"
+            s3_location = await upload_to_s3(png_data, s3_key, "image/png")
+            
+            processed_files.append(ProcessedFile(
+                original_filename=original_filename,
+                processed_filename=png_filename,
+                file_type="png",
+                file_size=len(png_data),
+                s3_location=s3_location,
+                s3_key=s3_key
+            ))
+            
+        elif file_type == 'pdf':
+            # Convert PDF to multiple PNGs (one per page)
+            png_list = convert_pdf_to_pngs(file_data)
+            base_filename = Path(original_filename).stem
+            
+            for page_num, png_data in enumerate(png_list, 1):
+                png_filename = f"{base_filename}_page_{page_num}.png"
+                s3_key = f"documents/{case_id}/{uuid.uuid4().hex[:8]}_{png_filename}"
+                s3_location = await upload_to_s3(png_data, s3_key, "image/png")
+                
+                processed_files.append(ProcessedFile(
+                    original_filename=original_filename,
+                    processed_filename=png_filename,
+                    file_type="png",
+                    file_size=len(png_data),
+                    s3_location=s3_location,
+                    s3_key=s3_key,
+                    page_number=page_num
+                ))
+        
+        else:
+            raise ValueError(f"Unsupported file type: {file_type}")
+        
+        return processed_files
+        
+    except Exception as e:
+        logger.error(f"Failed to process file {original_filename}: {e}")
+        raise
+
+def parse_uploaded_timestamp(timestamp_str: str) -> datetime:
+    """Parse uploaded timestamp handling timezone properly"""
+    try:
+        # Handle ISO format with 'Z' (UTC)
+        if timestamp_str.endswith('Z'):
+            timestamp_str = timestamp_str.replace('Z', '+00:00')
+        
+        # Parse the timestamp - FIX: Parse timestamp_str, not recursive call
+        uploaded_at = datetime.fromisoformat(timestamp_str)
+        
+        # Convert to UTC and make timezone-naive for database storage
+        if uploaded_at.tzinfo is not None:
+            uploaded_at = uploaded_at.astimezone(timezone.utc).replace(tzinfo=None)
+        
+        return uploaded_at
+        
+    except Exception as e:
+        logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}")
+        # Return current UTC time as fallback
+        return datetime.utcnow()
+
+# Email sending function
+async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
+    """Send email via Resend API"""
+    message_id = f"msg_{uuid.uuid4().hex[:12]}"
+    
+    try:
+        # Send email via Resend
+        email_data = {
+            "from": FROM_EMAIL,
+            "to": [request.recipient_email],
+            "subject": request.subject,
+            "html": request.html_body or f"<p>{request.body.replace(chr(10), '<br>')}</p>",
+            "text": request.body
+        }
+        
+        result = resend.Emails.send(email_data)
+        # Extract just the ID string from the Resend response
+        if hasattr(result, 'id'):
+            resend_id = result.id
+        elif isinstance(result, dict) and 'id' in result:
+            resend_id = result['id']
+        else:
+            resend_id = None
+        
+        # Log to database
+        async with db_pool.acquire() as conn:
+            # Insert into client_communications table
+            await conn.execute("""
+                INSERT INTO client_communications 
+                (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at, resend_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            """,
+            request.case_id, "email", "outgoing", "sent", FROM_EMAIL, 
+            request.recipient_email, request.subject, request.body, datetime.utcnow(), resend_id)
+        
+        logger.info(f"Email sent via Resend - ID: {resend_id}, To: {request.recipient_email}")
+        
+        return EmailResponse(
+            message_id=message_id,
+            status="sent",
+            recipient=request.recipient_email,
+            case_id=request.case_id,
+            sent_via="resend"
+        )
+        
+    except Exception as e:
+        # Log failure
+        async with db_pool.acquire() as conn:
+            # Insert into client_communications table
+            await conn.execute("""
+                INSERT INTO client_communications 
+                (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+            request.case_id, "email", "outgoing", "failed", FROM_EMAIL, 
+            request.recipient_email, request.subject, request.body, datetime.utcnow())
+        
+        logger.error(f"Email sending failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
+
+# FastAPI app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_database()
+    yield
+    await close_database()
+
+app = FastAPI(
+    title="Legal Communications Backend",
+    description="Backend API for case management and email communications", 
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://simple-s3-upload.onrender.com",  # frontend URL
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+async def health_check():
+    """Health check"""
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        
+        return {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "database": "connected",
+            "email": "resend_configured"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Health check failed: {str(e)}")
+
+@app.post("/api/upload-documents", response_model=FileUploadResponse)
+async def upload_documents(
+    case_id: str = Form(...),
+    files: List[UploadFile] = File(...)
+):
+    """Upload and process documents for a case"""
+    
+    logger.info(f"📄 Document upload request for case: {case_id}")
+    logger.info(f"📄 Files to process: {len(files)}")
+    
+    try:
+        # Verify case exists
+        async with db_pool.acquire() as conn:
+            case_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
+                case_id
+            )
+            if not case_exists:
+                raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
+        
+        all_processed_files = []
+        documents_created = 0
+        workflow_ids = []
+        
+        async with db_pool.acquire() as conn:
+            for file in files:
+                # Validate file type
+                if not is_supported_file_type(file.filename):
+                    logger.warning(f"Unsupported file type: {file.filename}")
+                    continue
+                
+                # Process the file (convert if necessary and upload to S3)
+                processed_files = await process_uploaded_file(file, case_id)
+                
+                # Create document records for each processed file
+                for processed_file in processed_files:
+                    document_id = f"doc_{uuid.uuid4().hex[:12]}"
+                    
+                    # Insert document record
+                    await conn.execute("""
+                        INSERT INTO documents 
+                        (document_id, case_id, filename, file_size, file_type, 
+                        s3_location, s3_key, s3_etag, status)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    """,
+                    document_id, case_id, processed_file.processed_filename, 
+                    processed_file.file_size, processed_file.file_type,
+                    processed_file.s3_location, processed_file.s3_key,
+                    None, "uploaded")  # No ETag for direct uploads
+                    
+                    documents_created += 1
+                    
+                    logger.info(f"📄 Created document record: {document_id} for case {case_id}")
+                    
+                    # Generate workflow ID and trigger analysis
+                    workflow_id = f"wf_upload_{uuid.uuid4().hex[:8]}"
+                    workflow_ids.append(workflow_id)
+                    
+                    # Trigger document analysis in background
+                    # Note: Using asyncio.create_task instead of BackgroundTasks for immediate execution
+                    import asyncio
+                    asyncio.create_task(trigger_document_analysis(
+                        document_id, case_id, processed_file.s3_location, workflow_id
+                    ))
+                
+                all_processed_files.extend(processed_files)
+        
+        return FileUploadResponse(
+            case_id=case_id,
+            total_files_processed=len(files),
+            documents_created=documents_created,
+            processed_files=all_processed_files,
+            analysis_triggered=documents_created > 0,
+            workflow_ids=workflow_ids,
+            message=f"Successfully processed {len(files)} files and created {documents_created} document records"
+        )
+        
+    except Exception as e:
+        logger.error(f"Document upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload processing failed: {str(e)}")
+    
+@app.post("/api/webhooks/document-uploaded", response_model=DocumentUploadResponse)
+async def handle_document_upload(request: S3UploadWebhookRequest, background_tasks: BackgroundTasks):
+    """Handle S3 document upload webhook and trigger analysis"""
+    
+    logger.info(f"📄 Document upload webhook received: {request.event}")
+    logger.info(f"📄 Files uploaded: {len(request.files)}")
+    
+    documents_created = 0
+    workflow_ids = []
+    
+    try:
+        async with db_pool.acquire() as conn:
+            for file_upload in request.files:
+                if file_upload.status != "success":
+                    logger.warning(f"Skipping failed upload: {file_upload.fileName}")
+                    continue
+                
+                # Extract client email from metadata
+                client_email = request.metadata.get("clientEmail")
+                if not client_email:
+                    logger.error("❌ No clientEmail in webhook metadata")
+                    raise HTTPException(status_code=400, detail="Missing clientEmail in webhook metadata")
+                
+                # Find case by client email
+                case_row = await conn.fetchrow(
+                    "SELECT case_id FROM cases WHERE client_email = $1 AND status = 'awaiting_documents'",
+                    client_email
+                )
+                
+                if not case_row:
+                    logger.error(f"❌ CRITICAL: No active case found for client email: {client_email}")
+                    logger.error(f"❌ Document upload failed - client {client_email} does not have an active case")
+                    raise HTTPException(
+                        status_code=404, 
+                        detail=f"No active case found for client email: {client_email}. Please ensure a case exists with status 'awaiting_documents'."
+                    )
+                
+                case_id = case_row['case_id']
+                
+                # Generate document ID
+                document_id = f"doc_{uuid.uuid4().hex[:12]}"
+                
+                # Insert document record
+                await conn.execute("""
+                    INSERT INTO documents 
+                    (document_id, case_id, filename, file_size, file_type, 
+                    s3_location, s3_key, s3_etag, status)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                document_id, case_id, file_upload.fileName, file_upload.fileSize,
+                file_upload.fileType, file_upload.s3Location, file_upload.s3Key,
+                file_upload.s3ETag, "uploaded")
+                
+                documents_created += 1
+                
+                logger.info(f"📄 Created document record: {document_id} for case {case_id}")
+                
+                # Generate workflow ID for tracking
+                workflow_id = f"wf_upload_{uuid.uuid4().hex[:8]}"
+                workflow_ids.append(workflow_id)
+                
+                # Trigger document analysis in background
+                background_tasks.add_task(
+                    trigger_document_analysis,
+                    document_id,
+                    case_id,
+                    file_upload.s3Location,
+                    workflow_id
+                )
+        
+        return DocumentUploadResponse(
+            documents_created=documents_created,
+            analysis_triggered=documents_created > 0,
+            workflow_ids=workflow_ids,
+            message=f"Successfully processed {documents_created} document uploads"
+        )
+        
+    except Exception as e:
+        logger.error(f"Document upload webhook failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
+
+@app.post("/api/webhooks/resend")
+async def handle_resend_webhook(webhook: ResendWebhook):
+    """Handle Resend webhooks (email.opened, email.delivered, email.failed, email.bounced)"""
+    
+    logger.info(f"📧 Resend webhook received: type={webhook.type}, email_id={webhook.data.email_id}")
+    
+    try:
+        async with db_pool.acquire() as conn:
+            if webhook.type == "email.opened":
+                # Parse the opened timestamp (top-level created_at is when email was opened)
+                opened_at = parse_uploaded_timestamp(webhook.created_at)
+                
+                # Update opened_at timestamp AND set status to "opened"
+                result = await conn.execute("""
+                    UPDATE client_communications 
+                    SET opened_at = $1, status = 'opened'
+                    WHERE resend_id = $2
+                """, opened_at, webhook.data.email_id)
+                
+                action = "opened"
+                
+            elif webhook.type == "email.failed":
+                # Only update status to "failed" (no timestamp update)
+                result = await conn.execute("""
+                    UPDATE client_communications 
+                    SET status = 'failed'
+                    WHERE resend_id = $1
+                """, webhook.data.email_id)
+                
+                failure_reason = webhook.data.failed.reason if webhook.data.failed else "unknown"
+                logger.info(f"❌ Email failed: reason={failure_reason}")
+                action = f"failed (reason: {failure_reason})"
+                
+            elif webhook.type == "email.bounced":
+                # Only update status to "failed" (no timestamp update)
+                result = await conn.execute("""
+                    UPDATE client_communications 
+                    SET status = 'failed'
+                    WHERE resend_id = $1
+                """, webhook.data.email_id)
+                
+                bounce_info = ""
+                if webhook.data.bounce:
+                    bounce_info = f"{webhook.data.bounce.type}/{webhook.data.bounce.subType}: {webhook.data.bounce.message}"
+                
+                logger.info(f"🔄 Email bounced: {bounce_info}")
+                action = f"bounced ({bounce_info})"
+                
+            elif webhook.type == "email.delivered":
+                # Only update status to "delivered" (no timestamp update)
+                result = await conn.execute("""
+                    UPDATE client_communications 
+                    SET status = 'delivered'
+                    WHERE resend_id = $1
+                """, webhook.data.email_id)
+                
+                action = "delivered"
+                
+            else:
+                logger.warning(f"⚠️ Unsupported webhook type: {webhook.type}")
+                return {"status": "unsupported", "type": webhook.type, "message": "Webhook type not supported"}
+            
+            # Check if any row was updated
+            rows_updated = int(result.split()[-1]) if result.startswith("UPDATE") else 0
+            
+            if rows_updated > 0:
+                logger.info(f"✅ Email {action}: Updated {rows_updated} record(s) for email_id={webhook.data.email_id}")
+                return {"status": "updated", "email_id": webhook.data.email_id, "rows_updated": rows_updated, "action": action}
+            else:
+                # Email ID not found - log but don't fail (as per requirements)
+                logger.info(f"ℹ️ Resend webhook: email_id={webhook.data.email_id} not found in database (likely from another system)")
+                return {"status": "not_found", "email_id": webhook.data.email_id, "message": "Email ID not found in database"}
+        
+    except Exception as e:
+        logger.error(f"Resend webhook processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")
+
+
+async def trigger_document_analysis(document_id: str, case_id: str, s3_location: str, workflow_id: str):
+    """Background task to trigger document analysis agent"""
+    try:
+        logger.info(f"🔄 Triggering analysis for document {document_id} with workflow {workflow_id}")
+        
+        # Update document status to analyzing
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE documents SET status = 'analyzing' WHERE document_id = $1",
+                document_id
+            )
+        
+        # Call Document Analysis Agent
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            analysis_request = {
+                "case_id": case_id,
+                "document_ids": [document_id],
+                "case_context": f"Single document upload analysis for document {document_id}",
+                "workflow_id": workflow_id
+            }
+            
+            response = await client.post(
+                f"{DOCUMENT_ANALYSIS_AGENT_URL}/workflows/trigger-analysis",
+                json=analysis_request
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                workflow_id = result.get("workflow_id")
+                logger.info(f"✅ Analysis triggered successfully: workflow {workflow_id}")
+            else:
+                logger.error(f"❌ Analysis trigger failed: {response.status_code} - {response.text}")
+                
+                # Update document status to failed
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE documents SET status = 'failed' WHERE document_id = $1",
+                        document_id
+                    )
+                
+    except Exception as e:
+        logger.error(f"Background analysis trigger failed for {document_id}: {e}")
+        
+        # Update document status to failed
+        try:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE documents SET status = 'failed' WHERE document_id = $1",
+                    document_id
+                )
+        except Exception as db_error:
+            logger.error(f"Failed to update document status: {db_error}")
+    
+@app.post("/api/documents/{document_id}/analysis", response_model=AnalysisResultResponse)
+async def store_document_analysis(document_id: str, request: AnalysisResultRequest):
+    """Store document analysis results"""
+    analysis_id = f"ana_{uuid.uuid4().hex[:12]}"
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Verify document exists
+            doc_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id = $1)", 
+                document_id
+            )
+            if not doc_exists:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            # Verify case exists
+            case_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
+                request.case_id
+            )
+            if not case_exists:
+                raise HTTPException(status_code=404, detail="Case not found")
+            
+            # Insert analysis result
+            await conn.execute("""
+                INSERT INTO document_analysis 
+                (analysis_id, document_id, case_id, workflow_id, analysis_content, 
+                 analysis_status, model_used, tokens_used, analyzed_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """, 
+            analysis_id, document_id, request.case_id, request.workflow_id,
+            request.analysis_content, request.analysis_status, request.model_used,
+            request.tokens_used, datetime.utcnow())
+            
+            # Update document status to analyzed
+            await conn.execute(
+                "UPDATE documents SET status = 'analyzed' WHERE document_id = $1",
+                document_id
+            )
+            
+            logger.info(f"Stored analysis result {analysis_id} for document {document_id}")
+            
+            return AnalysisResultResponse(
+                analysis_id=analysis_id,
+                document_id=document_id,
+                case_id=request.case_id,
+                status="stored",
+                analyzed_at=datetime.utcnow().isoformat()
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to store analysis result: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/documents/{document_id}/analysis")
+async def get_document_analysis(document_id: str):
+    """Get analysis results for a document"""
+    try:
+        async with db_pool.acquire() as conn:
+            analysis_row = await conn.fetchrow("""
+                SELECT analysis_id, document_id, case_id, workflow_id, analysis_content,
+                       analysis_status, model_used, tokens_used, analyzed_at, created_at
+                FROM document_analysis 
+                WHERE document_id = $1
+                ORDER BY analyzed_at DESC
+                LIMIT 1
+            """, document_id)
+            
+            if not analysis_row:
+                raise HTTPException(status_code=404, detail="Analysis not found for document")
+            
+            result = dict(analysis_row)
+            
+            # Convert timestamps to ISO format
+            for field in ['analyzed_at', 'created_at']:
+                if result[field]:
+                    result[field] = result[field].isoformat()
+            
+            return result
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get analysis result: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/cases/{case_id}/analysis-summary")
+async def get_case_analysis_summary(case_id: str):
+    """Get analysis summary for all documents in a case"""
+    try:
+        async with db_pool.acquire() as conn:
+            # Get case details
+            case_row = await conn.fetchrow("SELECT * FROM cases WHERE case_id = $1", case_id)
+            if not case_row:
+                raise HTTPException(status_code=404, detail="Case not found")
+            
+            # Get analysis results for all documents in the case
+            analysis_rows = await conn.fetch("""
+                SELECT da.analysis_id, da.document_id, d.filename,
+                       da.analysis_status, da.analyzed_at, da.model_used
+                FROM document_analysis da
+                JOIN documents d ON da.document_id = d.document_id
+                WHERE da.case_id = $1
+                ORDER BY da.analyzed_at DESC
+            """, case_id)
+            
+            analysis_summary = []
+            
+            for row in analysis_rows:
+                analysis_summary.append({
+                    "analysis_id": row['analysis_id'],
+                    "document_id": row['document_id'],
+                    "filename": row['filename'],
+                    "analysis_status": row['analysis_status'],
+                    "analyzed_at": row['analyzed_at'].isoformat(),
+                    "model_used": row['model_used']
+                })
+            
+            return {
+                "case_id": case_id,
+                "client_name": case_row['client_name'],
+                "total_documents_analyzed": len(analysis_summary),
+                "analysis_results": analysis_summary
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get case analysis summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+@app.get("/api/documents/{document_id}")
+async def get_document(document_id: str):
+    """Get document metadata by document ID"""
+    try:
+        async with db_pool.acquire() as conn:
+            doc_row = await conn.fetchrow("""
+                SELECT document_id, case_id, filename, file_size, file_type,
+                       s3_location, s3_key, s3_etag, status, created_at
+                FROM documents 
+                WHERE document_id = $1
+            """, document_id)
+            
+            if not doc_row:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            result = dict(doc_row)
+            
+            # Convert timestamps to ISO format
+            for field in ['created_at']:
+                if result[field]:
+                    result[field] = result[field].isoformat()
+            
+            return result
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get document: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# Case Management
+@app.post("/api/cases")
+async def create_case(request: CaseCreateRequest):
+    """Create a new case"""
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                # Create the case
+                await conn.execute("""
+                    INSERT INTO cases (case_id, client_name, client_email, client_phone, status, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                """, 
+                request.case_id, request.client_name, request.client_email, 
+                request.client_phone, "awaiting_documents", datetime.utcnow())
+                
+                # Insert requested documents
+                for doc in request.requested_documents:
+                    await conn.execute("""
+                        INSERT INTO requested_documents (case_id, document_name, description, requested_at, updated_at)
+                        VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    request.case_id, doc.document_name, doc.description, 
+                    datetime.utcnow(), datetime.utcnow())
+                
+                # Update any existing workflows that were created without a case_id
+                # and should be associated with this new case (e.g., communication workflows)
+                await conn.execute("""
+                    UPDATE workflow_states 
+                    SET case_id = $1 
+                    WHERE case_id IS NULL 
+                    AND agent_type = 'CommunicationsAgent'
+                    AND created_at >= NOW() - INTERVAL '1 hour'
+                """, request.case_id)
+            
+            return {
+                "case_id": request.case_id,
+                "client_name": request.client_name,
+                "client_email": request.client_email,
+                "client_phone": request.client_phone,
+                "status": "awaiting_documents",
+                "requested_documents": [doc.model_dump() for doc in request.requested_documents]
+            }
+            
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(status_code=409, detail="Case ID already exists")
+    except Exception as e:
+        logger.error(f"Failed to create case: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/cases/{case_id}")
+async def get_case(case_id: str):
+    """Get case details"""
+    try:
+        async with db_pool.acquire() as conn:
+            case_row = await conn.fetchrow(
+                "SELECT * FROM cases WHERE case_id = $1", case_id
+            )
+            
+            if not case_row:
+                raise HTTPException(status_code=404, detail="Case not found")
+            
+            # Get requested documents for this case
+            requested_docs = await conn.fetch("""
+                SELECT id, document_name, description, is_completed, completed_at, 
+                       is_flagged_for_review, notes, requested_at, updated_at
+                FROM requested_documents 
+                WHERE case_id = $1 
+                ORDER BY requested_at ASC
+            """, case_id)
+            
+            # Get last communication date from client_communications
+            last_comm = await conn.fetchrow("""
+                SELECT created_at 
+                FROM client_communications 
+                WHERE case_id = $1 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            """, case_id)
+            
+            return {
+                "case_id": case_row['case_id'],
+                "client_name": case_row['client_name'],
+                "client_email": case_row['client_email'],
+                "client_phone": case_row['client_phone'],
+                "status": case_row['status'],
+                "created_at": case_row['created_at'].isoformat(),
+                "last_communication_date": last_comm['created_at'].isoformat() if last_comm else None,
+                "requested_documents": [
+                    {
+                        "id": str(doc['id']),
+                        "document_name": doc['document_name'],
+                        "description": doc['description'],
+                        "is_completed": doc['is_completed'],
+                        "completed_at": doc['completed_at'].isoformat() if doc['completed_at'] else None,
+                        "is_flagged_for_review": doc['is_flagged_for_review'],
+                        "notes": doc['notes'],
+                        "requested_at": doc['requested_at'].isoformat(),
+                        "updated_at": doc['updated_at'].isoformat()
+                    } for doc in requested_docs
+                ]
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to get case: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/cases/{case_id}/communications")
+async def get_case_communications(case_id: str):
+    """Get communication history for a case"""
+    try:
+        async with db_pool.acquire() as conn:
+            # Get case details
+            case_row = await conn.fetchrow("SELECT * FROM cases WHERE case_id = $1", case_id)
+            if not case_row:
+                raise HTTPException(status_code=404, detail="Case not found")
+            
+            # Get requested documents for this case
+            requested_docs = await conn.fetch("""
+                SELECT id, document_name, description, is_completed, completed_at, 
+                       is_flagged_for_review, notes, requested_at, updated_at
+                FROM requested_documents 
+                WHERE case_id = $1 
+                ORDER BY requested_at ASC
+            """, case_id)
+            
+            # Get communication history from new table
+            communications = await conn.fetch("""
+                SELECT id, channel, direction, status, opened_at, sender, recipient, 
+                       subject, message_content, created_at, sent_at, resend_id
+                FROM client_communications 
+                WHERE case_id = $1 
+                ORDER BY created_at DESC
+                LIMIT 50
+            """, case_id)
+            
+            return {
+                "case_id": case_id,
+                "client_name": case_row['client_name'],
+                "client_email": case_row['client_email'],
+                "client_phone": case_row['client_phone'],
+                "case_status": case_row['status'],
+                "requested_documents": [
+                    {
+                        "id": str(doc['id']),
+                        "document_name": doc['document_name'],
+                        "description": doc['description'],
+                        "is_completed": doc['is_completed'],
+                        "completed_at": doc['completed_at'].isoformat() if doc['completed_at'] else None,
+                        "is_flagged_for_review": doc['is_flagged_for_review'],
+                        "notes": doc['notes'],
+                        "requested_at": doc['requested_at'].isoformat(),
+                        "updated_at": doc['updated_at'].isoformat()
+                    } for doc in requested_docs
+                ],
+                "last_communication_date": communications[0]['created_at'].isoformat() if communications else None,
+                "communication_summary": {
+                    "total_communications": len(communications),
+                    "last_communication_date": communications[0]['created_at'].isoformat() if communications else None
+                },
+                "communications": [
+                    {
+                        "id": str(comm['id']),
+                        "channel": comm['channel'],
+                        "direction": comm['direction'],
+                        "status": comm['status'],
+                        "opened_at": comm['opened_at'].isoformat() if comm['opened_at'] else None,
+                        "sender": comm['sender'],
+                        "recipient": comm['recipient'],
+                        "subject": comm['subject'],
+                        "message_content": comm['message_content'],
+                        "created_at": comm['created_at'].isoformat(),
+                        "sent_at": comm['sent_at'].isoformat() if comm['sent_at'] else None,
+                        "resend_id": comm['resend_id']
+                    } for comm in communications
+                ]
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to get case communications: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/cases/pending-reminders")
+async def get_pending_reminder_cases():
+    """Get cases that need reminder emails"""
+    try:
+        async with db_pool.acquire() as conn:
+            cutoff_date = datetime.utcnow() - timedelta(days=3)
+            
+            # Get cases and their last communication date from the new table
+            rows = await conn.fetch("""
+                SELECT c.case_id, c.client_email, c.client_name, c.client_phone, c.status,
+                       MAX(cc.created_at) as last_communication_date
+                FROM cases c
+                LEFT JOIN client_communications cc ON c.case_id = cc.case_id
+                WHERE c.status = 'awaiting_documents'
+                GROUP BY c.case_id, c.client_email, c.client_name, c.client_phone, c.status
+                HAVING MAX(cc.created_at) IS NULL OR MAX(cc.created_at) < $1
+                ORDER BY MAX(cc.created_at) ASC NULLS FIRST
+                LIMIT 20
+            """, cutoff_date)
+            
+            cases = []
+            for row in rows:
+                # Get requested documents for each case
+                requested_docs = await conn.fetch("""
+                    SELECT document_name, description, is_completed
+                    FROM requested_documents 
+                    WHERE case_id = $1 
+                    ORDER BY requested_at ASC
+                """, row['case_id'])
+                
+                cases.append({
+                    "case_id": row['case_id'],
+                    "client_email": row['client_email'],
+                    "client_name": row['client_name'],
+                    "client_phone": row['client_phone'],
+                    "status": row['status'],
+                    "last_communication_date": row['last_communication_date'].isoformat() if row['last_communication_date'] else None,
+                    "requested_documents": [
+                        {
+                            "document_name": doc['document_name'],
+                            "description": doc['description'],
+                            "is_completed": doc['is_completed']
+                        } for doc in requested_docs
+                    ]
+                })
+            
+            return {"found_cases": len(cases), "cases": cases}
+            
+    except Exception as e:
+        logger.error(f"Failed to get pending cases: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# Email Management
+@app.post("/api/send-email")
+async def send_email(request: EmailRequest):
+    """Send email via Resend"""
+    return await send_email_via_resend(request)
+
+# Workflow Management
+@app.post("/api/workflows")
+async def create_workflow(request: WorkflowCreateRequest):
+    """Create a new workflow"""
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO workflow_states 
+                (workflow_id, agent_type, case_id, status, initial_prompt, reasoning_chain)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            request.workflow_id, request.agent_type, request.case_id, request.status.value,
+            request.initial_prompt, json.dumps([]))
+            
+            # Fetch the created workflow with auto-generated timestamps
+            row = await conn.fetchrow(
+                "SELECT * FROM workflow_states WHERE workflow_id = $1", request.workflow_id
+            )
+            
+            return {
+                "workflow_id": request.workflow_id,
+                "agent_type": request.agent_type,
+                "case_id": request.case_id,
+                "status": request.status.value,
+                "initial_prompt": request.initial_prompt,
+                "reasoning_chain": [],
+                "created_at": row['created_at'].isoformat() if row['created_at'] else None
+            }
+            
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(status_code=409, detail="Workflow ID already exists")
+    except Exception as e:
+        logger.error(f"Failed to create workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/workflows/{workflow_id}")
+async def get_workflow(workflow_id: str):
+    """Get workflow by ID"""
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM workflow_states WHERE workflow_id = $1", workflow_id
+            )
+            
+            if not row:
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            reasoning_chain = json.loads(row['reasoning_chain']) if row['reasoning_chain'] else []
+            
+            return {
+                "workflow_id": row['workflow_id'],
+                "agent_type": row['agent_type'],
+                "case_id": row['case_id'],
+                "status": row['status'],
+                "initial_prompt": row['initial_prompt'],
+                "reasoning_chain": reasoning_chain,
+                "created_at": row['created_at'].isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to get workflow: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.put("/api/workflows/{workflow_id}/status")
+async def update_workflow_status(workflow_id: str, request: WorkflowStatusRequest):
+    """Update workflow status"""
+    try:
+        async with db_pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE workflow_states SET status = $1 WHERE workflow_id = $2",
+                request.status.value, workflow_id
+            )
+            
+            if result == "UPDATE 0":
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            return {"status": "updated", "workflow_id": workflow_id}
+            
+    except Exception as e:
+        logger.error(f"Failed to update workflow status: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.post("/api/workflows/{workflow_id}/reasoning-step")
+async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
+    """Add a reasoning step to workflow"""
+    try:
+        async with db_pool.acquire() as conn:
+            # Get current reasoning chain
+            current_chain = await conn.fetchval(
+                "SELECT reasoning_chain FROM workflow_states WHERE workflow_id = $1",
+                workflow_id
+            )
+            
+            if current_chain is None:
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            # Parse and append new step
+            chain = json.loads(current_chain) if current_chain else []
+            chain.append(step.model_dump())
+            
+            # Update database
+            await conn.execute(
+                "UPDATE workflow_states SET reasoning_chain = $1 WHERE workflow_id = $2",
+                json.dumps(chain), workflow_id
+            )
+            
+            return {"status": "step_added", "workflow_id": workflow_id}
+            
+    except Exception as e:
+        logger.error(f"Failed to add reasoning step: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/workflows/pending")
+async def get_pending_workflows():
+    """Get workflows that need processing"""
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT workflow_id FROM workflow_states 
+                WHERE status = 'PENDING'
+                ORDER BY created_at ASC
+                LIMIT 50
+            """)
+            
+            workflow_ids = [row['workflow_id'] for row in rows]
+            return {"workflow_ids": workflow_ids}
+            
+    except Exception as e:
+        logger.error(f"Failed to get pending workflows: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    logger.info(f"Starting backend server on port {PORT}")
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
