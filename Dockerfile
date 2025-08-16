@@ -13,7 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
+
+# Copy the application code and modules
 COPY main.py .
+COPY config/ ./config/
+COPY models/ ./models/
+COPY database/ ./database/
+COPY services/ ./services/
+COPY api/ ./api/
+COPY utils/ ./utils/
 
 RUN useradd --create-home --shell /bin/bash backend \
     && chown -R backend:backend /app
