@@ -4,6 +4,7 @@ Workflow management API routes
 
 import json
 import logging
+import re
 from fastapi import APIRouter, HTTPException
 import asyncpg
 
@@ -51,6 +52,11 @@ async def get_workflow(workflow_id: str):
     """Get workflow by ID"""
     db_pool = get_db_pool()
     
+    # Validate UUID format
+    uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+    if not uuid_pattern.match(workflow_id):
+        raise HTTPException(status_code=400, detail=f"Invalid workflow_id format. Expected UUID, got: {workflow_id}")
+    
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -81,6 +87,11 @@ async def update_workflow_status(workflow_id: str, request: WorkflowStatusReques
     """Update workflow status"""
     db_pool = get_db_pool()
     
+    # Validate UUID format
+    uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+    if not uuid_pattern.match(workflow_id):
+        raise HTTPException(status_code=400, detail=f"Invalid workflow_id format. Expected UUID, got: {workflow_id}")
+    
     try:
         async with db_pool.acquire() as conn:
             result = await conn.execute(
@@ -101,6 +112,11 @@ async def update_workflow_status(workflow_id: str, request: WorkflowStatusReques
 async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
     """Add a reasoning step to workflow"""
     db_pool = get_db_pool()
+    
+    # Validate UUID format
+    uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+    if not uuid_pattern.match(workflow_id):
+        raise HTTPException(status_code=400, detail=f"Invalid workflow_id format. Expected UUID, got: {workflow_id}")
     
     try:
         async with db_pool.acquire() as conn:
