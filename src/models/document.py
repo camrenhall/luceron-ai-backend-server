@@ -258,46 +258,26 @@ class DocumentUpdateResponse(BaseModel):
     message: str = "Document record updated successfully"
 
 
-# Document Analysis Aggregated Models
+# Enhanced Document Analysis Models
 
-class DocumentAnalysisAggregatedData(BaseModel):
-    """Data model for document_analysis_aggregated table"""
-    aggregated_analysis_id: UUID
-    case_id: UUID
-    analysis_batch_contents: Dict[str, Any]
-    model_used: str
-    total_documents_analyzed: int
-    total_tokens_used: Optional[int] = None
-    created_at: datetime
-
-
-class DocumentAnalysisAggregatedCreateRequest(BaseModel):
-    """Request model for creating aggregated analysis record"""
-    case_id: UUID = Field(..., description="Case UUID that this aggregated analysis belongs to")
-    analysis_batch_contents: Dict[str, Any] = Field(..., description="JSONB containing batch analysis results")
-    model_used: str = Field(..., max_length=50, description="Model identifier used for analysis")
-    total_documents_analyzed: int = Field(..., ge=0, description="Total number of documents analyzed in this batch")
-    total_tokens_used: Optional[int] = Field(None, ge=0, description="Total tokens consumed in this batch")
+class DocumentAnalysisUpdateRequest(BaseModel):
+    """Request model for updating document analysis"""
+    analysis_content: Optional[str] = Field(None, description="Updated analysis content JSON")
+    analysis_status: Optional[AnalysisStatus] = Field(None, description="Updated analysis status")
+    model_used: Optional[str] = Field(None, description="Updated model identifier")
+    tokens_used: Optional[int] = Field(None, ge=0, description="Updated token count")
     
-    @validator('model_used')
-    def validate_model_used(cls, v):
-        if not v or not v.strip():
-            raise ValueError('model_used cannot be empty')
-        return v.strip()
-    
-    @validator('analysis_batch_contents')
-    def validate_analysis_batch_contents(cls, v):
-        if not v:
-            raise ValueError('analysis_batch_contents cannot be empty')
-        return v
-
-
-class DocumentAnalysisAggregatedUpdateRequest(BaseModel):
-    """Request model for updating aggregated analysis record"""
-    analysis_batch_contents: Optional[Dict[str, Any]] = Field(None, description="Updated batch analysis contents")
-    model_used: Optional[str] = Field(None, max_length=50, description="Updated model identifier")
-    total_documents_analyzed: Optional[int] = Field(None, ge=0, description="Updated total documents analyzed")
-    total_tokens_used: Optional[int] = Field(None, ge=0, description="Updated total tokens used")
+    @validator('analysis_content')
+    def validate_analysis_content(cls, v):
+        if v is not None:
+            if not v or not v.strip():
+                raise ValueError('analysis_content cannot be empty string')
+            try:
+                import json
+                json.loads(v)
+            except json.JSONDecodeError:
+                raise ValueError('analysis_content must be valid JSON')
+        return v.strip() if v else v
     
     @validator('model_used')
     def validate_model_used(cls, v):
@@ -305,33 +285,35 @@ class DocumentAnalysisAggregatedUpdateRequest(BaseModel):
             raise ValueError('model_used cannot be empty string')
         return v.strip() if v else v
     
-    @validator('analysis_batch_contents')
-    def validate_analysis_batch_contents(cls, v):
-        if v is not None and not v:
-            raise ValueError('analysis_batch_contents cannot be empty')
-        return v
-    
     class Config:
         extra = "forbid"
 
 
-class DocumentAnalysisAggregatedCreateResponse(BaseModel):
-    """Response model for aggregated analysis creation"""
+class DocumentAnalysisUpdateResponse(BaseModel):
+    """Response model for document analysis update"""
     success: bool
-    aggregated_analysis_id: UUID
-    case_id: UUID
-    model_used: str
-    total_documents_analyzed: int
-    total_tokens_used: Optional[int] = None
-    created_at: datetime
-    message: str = "Aggregated analysis record created successfully"
-
-
-class DocumentAnalysisAggregatedUpdateResponse(BaseModel):
-    """Response model for aggregated analysis update"""
-    success: bool
-    aggregated_analysis_id: UUID
+    analysis_id: UUID
     updated_fields: List[str]
-    total_documents_analyzed: int
     updated_at: datetime
-    message: str = "Aggregated analysis record updated successfully"
+    message: str = "Analysis updated successfully"
+
+
+class DocumentAnalysisByCaseResponse(BaseModel):
+    """Response model for retrieving all analyses for a case"""
+    case_id: UUID
+    total_analyses: int
+    total_tokens_used: Optional[int]
+    analyses: List[DocumentAnalysisData]
+    aggregated_content: Optional[Dict[str, Any]] = Field(None, description="Optional aggregated analysis data")
+
+
+class DocumentAnalysisAggregatedSummary(BaseModel):
+    """Model for aggregated analysis summary computed via SQL"""
+    case_id: UUID
+    total_documents: int
+    total_tokens: Optional[int]
+    models_used: List[str]
+    status_breakdown: Dict[str, int]
+    earliest_analysis: Optional[datetime]
+    latest_analysis: Optional[datetime]
+    aggregated_insights: Optional[Dict[str, Any]]

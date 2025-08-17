@@ -22,7 +22,12 @@ from models.document import (
     DocumentCreateRequest,
     DocumentCreateResponse,
     DocumentUpdateRequest,
-    DocumentUpdateResponse
+    DocumentUpdateResponse,
+    DocumentAnalysisData,
+    DocumentAnalysisUpdateRequest,
+    DocumentAnalysisUpdateResponse,
+    DocumentAnalysisByCaseResponse,
+    DocumentAnalysisAggregatedSummary
 )
 from database.connection import get_db_pool
 from utils.auth import AuthConfig
@@ -678,4 +683,309 @@ async def get_document(
         raise
     except Exception as e:
         logger.error(f"Failed to get document: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# Enhanced Document Analysis Endpoints
+
+@router.get("/analysis/case/{case_id}", response_model=DocumentAnalysisByCaseResponse)
+async def get_all_analyses_by_case(
+    case_id: str,
+    include_content: bool = True,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """
+    Get all document analyses for a specific case with full content.
+    
+    This endpoint retrieves all analysis records for documents belonging to a case,
+    including the full analysis_content JSON. This replaces the need for a separate
+    aggregated table as data can be aggregated on-demand.
+    """
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Validate case exists
+            case_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
+                case_id
+            )
+            if not case_exists:
+                raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
+            
+            # Get all analyses for the case
+            if include_content:
+                query = """
+                    SELECT da.analysis_id, da.document_id, da.case_id, 
+                           da.analysis_content, da.analysis_status, da.model_used,
+                           da.tokens_used, da.analyzed_at, da.created_at,
+                           d.original_file_name
+                    FROM document_analysis da
+                    JOIN documents d ON da.document_id = d.document_id
+                    WHERE da.case_id = $1
+                    ORDER BY da.analyzed_at DESC
+                """
+            else:
+                query = """
+                    SELECT da.analysis_id, da.document_id, da.case_id,
+                           da.analysis_status, da.model_used,
+                           da.tokens_used, da.analyzed_at, da.created_at,
+                           d.original_file_name
+                    FROM document_analysis da
+                    JOIN documents d ON da.document_id = d.document_id
+                    WHERE da.case_id = $1
+                    ORDER BY da.analyzed_at DESC
+                """
+            
+            rows = await conn.fetch(query, case_id)
+            
+            # Calculate totals
+            total_tokens = await conn.fetchval("""
+                SELECT SUM(tokens_used) 
+                FROM document_analysis 
+                WHERE case_id = $1 AND tokens_used IS NOT NULL
+            """, case_id)
+            
+            analyses = []
+            for row in rows:
+                analysis_data = DocumentAnalysisData(
+                    analysis_id=row['analysis_id'],
+                    document_id=row['document_id'],
+                    case_id=row['case_id'],
+                    analysis_content=row.get('analysis_content', '{}') if include_content else '{}',
+                    analysis_status=row['analysis_status'],
+                    model_used=row['model_used'],
+                    tokens_used=row['tokens_used'],
+                    analyzed_at=row['analyzed_at'],
+                    created_at=row['created_at']
+                )
+                analyses.append(analysis_data)
+            
+            logger.info(f"Retrieved {len(analyses)} analyses for case {case_id}")
+            
+            return DocumentAnalysisByCaseResponse(
+                case_id=case_id,
+                total_analyses=len(analyses),
+                total_tokens_used=int(total_tokens) if total_tokens else None,
+                analyses=analyses,
+                aggregated_content=None  # Can be populated with custom aggregation logic if needed
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get analyses for case: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.get("/analysis/case/{case_id}/aggregate", response_model=DocumentAnalysisAggregatedSummary)
+async def get_aggregated_analysis_summary(
+    case_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """
+    Get aggregated analysis summary for a case using SQL aggregation.
+    
+    This endpoint provides a summary of all analyses for a case, computed
+    dynamically via SQL aggregation functions rather than storing pre-aggregated data.
+    """
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Validate case exists
+            case_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
+                case_id
+            )
+            if not case_exists:
+                raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
+            
+            # Get aggregated statistics
+            stats = await conn.fetchrow("""
+                SELECT 
+                    COUNT(*) as total_documents,
+                    SUM(tokens_used) as total_tokens,
+                    MIN(analyzed_at) as earliest_analysis,
+                    MAX(analyzed_at) as latest_analysis,
+                    array_agg(DISTINCT model_used) as models_used
+                FROM document_analysis
+                WHERE case_id = $1
+            """, case_id)
+            
+            # Get status breakdown
+            status_breakdown_rows = await conn.fetch("""
+                SELECT analysis_status, COUNT(*) as count
+                FROM document_analysis
+                WHERE case_id = $1
+                GROUP BY analysis_status
+            """, case_id)
+            
+            status_breakdown = {row['analysis_status']: row['count'] for row in status_breakdown_rows}
+            
+            # Optionally aggregate insights from analysis_content
+            # This is where you could parse and combine the JSON content
+            aggregated_insights = None
+            if stats['total_documents'] > 0:
+                # Example: Get all analysis contents and aggregate them
+                contents = await conn.fetch("""
+                    SELECT analysis_content
+                    FROM document_analysis
+                    WHERE case_id = $1 AND analysis_status = 'completed'
+                """, case_id)
+                
+                # Here you could implement custom logic to merge/aggregate the JSON contents
+                # For now, we'll just count the documents
+                aggregated_insights = {
+                    "total_completed_analyses": len(contents),
+                    "processing_note": "Individual analyses can be merged here based on specific business logic"
+                }
+            
+            logger.info(f"Generated aggregated summary for case {case_id}: {stats['total_documents']} documents")
+            
+            return DocumentAnalysisAggregatedSummary(
+                case_id=case_id,
+                total_documents=stats['total_documents'] or 0,
+                total_tokens=int(stats['total_tokens']) if stats['total_tokens'] else None,
+                models_used=stats['models_used'] or [],
+                status_breakdown=status_breakdown,
+                earliest_analysis=stats['earliest_analysis'],
+                latest_analysis=stats['latest_analysis'],
+                aggregated_insights=aggregated_insights
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get aggregated analysis summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.put("/analysis/{analysis_id}", response_model=DocumentAnalysisUpdateResponse)
+async def update_document_analysis(
+    analysis_id: str,
+    request: DocumentAnalysisUpdateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """
+    Update an existing document analysis record.
+    
+    This endpoint allows updating analysis content, status, model, or token count
+    for reprocessing or correction purposes.
+    """
+    db_pool = get_db_pool()
+    
+    # Validate at least one field is provided
+    update_data = request.dict(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one field must be provided for update"
+        )
+    
+    logger.info(f"Updating analysis {analysis_id} with fields: {list(update_data.keys())}")
+    
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                # Verify analysis exists
+                exists = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM document_analysis WHERE analysis_id = $1)",
+                    analysis_id
+                )
+                if not exists:
+                    raise HTTPException(status_code=404, detail="Analysis not found")
+                
+                # Build dynamic update query
+                set_clauses = []
+                values = []
+                param_count = 1
+                
+                for field, value in update_data.items():
+                    set_clauses.append(f"{field} = ${param_count}")
+                    values.append(value)
+                    param_count += 1
+                
+                # Add analysis_id as the last parameter
+                values.append(analysis_id)
+                
+                query = f"""
+                    UPDATE document_analysis 
+                    SET {', '.join(set_clauses)}
+                    WHERE analysis_id = ${param_count}
+                """
+                
+                await conn.execute(query, *values)
+                
+                logger.info(f"Analysis {analysis_id} updated successfully")
+                
+                return DocumentAnalysisUpdateResponse(
+                    success=True,
+                    analysis_id=analysis_id,
+                    updated_fields=list(update_data.keys()),
+                    updated_at=datetime.utcnow()
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.delete("/analysis/{analysis_id}")
+async def delete_document_analysis(
+    analysis_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """
+    Delete a document analysis record.
+    
+    This endpoint allows deletion of analysis records for data management purposes.
+    """
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                # Get document_id before deletion for status update
+                doc_id = await conn.fetchval(
+                    "SELECT document_id FROM document_analysis WHERE analysis_id = $1",
+                    analysis_id
+                )
+                
+                if not doc_id:
+                    raise HTTPException(status_code=404, detail="Analysis not found")
+                
+                # Delete the analysis
+                await conn.execute(
+                    "DELETE FROM document_analysis WHERE analysis_id = $1",
+                    analysis_id
+                )
+                
+                # Check if document has any other analyses
+                other_analyses = await conn.fetchval(
+                    "SELECT COUNT(*) FROM document_analysis WHERE document_id = $1",
+                    doc_id
+                )
+                
+                # If no other analyses exist, update document status
+                if other_analyses == 0:
+                    await conn.execute(
+                        "UPDATE documents SET status = 'converted' WHERE document_id = $1",
+                        doc_id
+                    )
+                
+                logger.info(f"Analysis {analysis_id} deleted successfully")
+                
+                return {
+                    "success": True,
+                    "analysis_id": analysis_id,
+                    "message": "Analysis deleted successfully"
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete analysis: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
