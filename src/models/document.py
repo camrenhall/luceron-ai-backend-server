@@ -28,7 +28,7 @@ class DocumentAnalysisData(BaseModel):
     analysis_id: UUID
     document_id: UUID
     case_id: UUID
-    workflow_id: Optional[UUID] = None
+    workflow_id: Optional[UUID] = Field(None, description="Internal agent workflow UUID (not used for AWS workflows)")
     analysis_content: str
     analysis_status: AnalysisStatus = AnalysisStatus.COMPLETED
     model_used: str
@@ -39,7 +39,6 @@ class DocumentAnalysisData(BaseModel):
 class AnalysisResultRequest(BaseModel):
     document_id: UUID
     case_id: UUID
-    workflow_id: Optional[UUID] = None
     analysis_content: str
     model_used: str = "o3"
     tokens_used: Optional[int] = None
@@ -114,7 +113,6 @@ class BulkAnalysisRecord(BaseModel):
     """Individual analysis record for bulk operations"""
     document_id: UUID = Field(..., description="Document UUID to associate analysis with")
     case_id: UUID = Field(..., description="Case UUID for the analysis")
-    workflow_id: Optional[UUID] = Field(None, description="Optional workflow UUID")
     analysis_content: str = Field(..., description="JSON string containing analysis results")
     analysis_status: AnalysisStatus = Field(AnalysisStatus.COMPLETED, description="Status of the analysis")
     model_used: str = Field(..., description="Model identifier used for analysis")

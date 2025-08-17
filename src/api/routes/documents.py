@@ -484,12 +484,12 @@ async def bulk_store_document_analysis(
                         # Insert analysis record
                         analysis_id = await conn.fetchval("""
                             INSERT INTO document_analysis 
-                            (document_id, case_id, workflow_id, analysis_content, 
+                            (document_id, case_id, analysis_content, 
                              analysis_status, model_used, tokens_used, analyzed_at)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
                             RETURNING analysis_id
                         """, 
-                        analysis.document_id, analysis.case_id, analysis.workflow_id,
+                        analysis.document_id, analysis.case_id,
                         analysis.analysis_content, analysis.analysis_status, 
                         analysis.model_used, analysis.tokens_used, analysis.analyzed_at)
                         
@@ -572,15 +572,15 @@ async def store_document_analysis(
             if not case_exists:
                 raise HTTPException(status_code=404, detail="Case not found")
             
-            # Insert analysis result and get the generated UUID
+            # Insert analysis result
             analysis_id = await conn.fetchval("""
                 INSERT INTO document_analysis 
-                (document_id, case_id, workflow_id, analysis_content, 
+                (document_id, case_id, analysis_content, 
                  analysis_status, model_used, tokens_used, analyzed_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING analysis_id
             """, 
-            document_id, request.case_id, request.workflow_id,
+            document_id, request.case_id,
             request.analysis_content, request.analysis_status, request.model_used,
             request.tokens_used, datetime.utcnow())
             

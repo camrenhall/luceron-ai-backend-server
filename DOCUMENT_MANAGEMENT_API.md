@@ -218,4 +218,10 @@ Documents follow this status progression:
 - Input validation and sanitization
 - Comprehensive error logging for monitoring
 
+## Architecture Notes
+
+- **Workflow Separation**: AWS State Machine workflows operate independently from internal agent workflows
+- **Database Design**: `workflow_states` table reserved exclusively for internal agent workflows, not AWS pipeline executions
+- **Clean API**: AWS document processing endpoints don't reference internal workflow tracking
+
 This API provides a robust foundation for the AWS document processing pipeline with enterprise-grade error handling, validation, and performance monitoring.
