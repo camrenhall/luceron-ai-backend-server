@@ -441,7 +441,8 @@ async def bulk_store_document_analysis(
                     WHERE document_id = ANY($1::uuid[])
                 """, list(document_ids))
                 
-                valid_document_ids = {doc['document_id'] for doc in existing_documents}
+                # Ensure consistent string comparison - convert all UUIDs to strings
+                valid_document_ids = {str(doc['document_id']) for doc in existing_documents}
                 
                 # Batch validate case existence
                 existing_cases = await conn.fetch("""
@@ -450,29 +451,42 @@ async def bulk_store_document_analysis(
                     WHERE case_id = ANY($1::uuid[])
                 """, list(case_ids))
                 
-                valid_case_ids = {case['case_id'] for case in existing_cases}
+                # Ensure consistent string comparison - convert all UUIDs to strings
+                valid_case_ids = {str(case['case_id']) for case in existing_cases}
                 
                 logger.info(f"Validated {len(valid_document_ids)} documents and "
                            f"{len(valid_case_ids)} cases from batch")
                 
+                # Debug logging for UUID validation
+                logger.debug(f"Valid document IDs: {list(valid_document_ids)[:5]}...")  # Log first 5
+                logger.debug(f"Valid case IDs: {list(valid_case_ids)[:5]}...")  # Log first 5
+                
                 # Process each analysis record
                 for i, analysis in enumerate(request.analyses):
                     try:
+                        analysis_doc_id = str(analysis.document_id)
+                        analysis_case_id = str(analysis.case_id)
+                        
+                        # Enhanced debug logging for troubleshooting
+                        logger.debug(f"Processing analysis {i}: document_id={analysis_doc_id}, case_id={analysis_case_id}")
+                        
                         # Validate document exists
-                        if str(analysis.document_id) not in valid_document_ids:
+                        if analysis_doc_id not in valid_document_ids:
+                            logger.warning(f"Document validation failed: {analysis_doc_id} not in {len(valid_document_ids)} valid documents")
                             failed_records.append(AnalysisFailure(
                                 index=i,
-                                record_id=str(analysis.document_id),
+                                record_id=analysis_doc_id,
                                 error=f"Document {analysis.document_id} not found",
                                 error_code="DOCUMENT_NOT_FOUND"
                             ))
                             continue
                         
                         # Validate case exists
-                        if str(analysis.case_id) not in valid_case_ids:
+                        if analysis_case_id not in valid_case_ids:
+                            logger.warning(f"Case validation failed: {analysis_case_id} not in {len(valid_case_ids)} valid cases")
                             failed_records.append(AnalysisFailure(
                                 index=i,
-                                record_id=str(analysis.case_id),
+                                record_id=analysis_case_id,
                                 error=f"Case {analysis.case_id} not found",
                                 error_code="CASE_NOT_FOUND"
                             ))
@@ -499,13 +513,13 @@ async def bulk_store_document_analysis(
                         
                         inserted_count += 1
                         
-                        logger.debug(f"Stored analysis {analysis_id} for document {analysis.document_id}")
+                        logger.debug(f"Stored analysis {analysis_id} for document {analysis_doc_id}")
                         
                     except Exception as record_error:
                         logger.warning(f"Failed to store analysis record at index {i}: {record_error}")
                         failed_records.append(AnalysisFailure(
                             index=i,
-                            record_id=str(analysis.document_id),
+                            record_id=analysis_doc_id,
                             error=str(record_error),
                             error_code="STORAGE_ERROR"
                         ))
