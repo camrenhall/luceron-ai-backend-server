@@ -26,6 +26,7 @@ from models.document import (
 )
 from database.connection import get_db_pool
 from utils.auth import AuthConfig
+from utils.error_handling import set_endpoint_context, log_business_error
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -140,11 +141,11 @@ async def create_document(
     This endpoint is used by AWS State Machine when a file is first uploaded
     to create the initial document record with original file metadata.
     """
+    set_endpoint_context("document_creation")
     start_time = time.time()
     db_pool = get_db_pool()
     
-    logger.info(f"Creating document record: file={request.original_file_name}, "
-                f"case_id={request.case_id}, batch_id={request.batch_id}")
+    logger.info(f"Creating document: {request.original_file_name} for case {request.case_id}")
     
     try:
         async with db_pool.acquire() as conn:
@@ -229,12 +230,11 @@ async def update_document(
     This endpoint is used by AWS State Machine to update document records
     with processed file metadata and status changes during the pipeline.
     """
+    set_endpoint_context("document_update")
     start_time = time.time()
     db_pool = get_db_pool()
     
-    logger.info(f"Document update request - document_id: {document_id}")
-    logger.info(f"Request data: {request.dict()}")
-    logger.debug(f"Request JSON representation: {request.json()}")
+    logger.info(f"Updating document {document_id}")
     
     # Validate at least one field is provided for update
     update_data = request.dict(exclude_unset=True)
@@ -417,6 +417,7 @@ async def bulk_store_document_analysis(
     This endpoint is designed for high-throughput batch processing from Lambda functions
     and supports atomic transactions with detailed error reporting.
     """
+    set_endpoint_context("bulk_analysis_storage")
     start_time = time.time()
     db_pool = get_db_pool()
     
