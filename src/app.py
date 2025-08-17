@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import PORT, ALLOWED_ORIGINS
 from database.connection import init_database, close_database
-from api.routes import health, documents, cases, emails, workflows, webhooks
+from api.routes import health, documents, cases, emails, workflows, webhooks, document_analysis_aggregated
 from utils.error_handling import setup_error_handling
 
 # Configure logging
@@ -52,6 +52,7 @@ app.include_router(cases.router, prefix="/api/cases", tags=["Cases"])
 app.include_router(emails.router, prefix="/api", tags=["Emails"])
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
+app.include_router(document_analysis_aggregated.router, prefix="/api/document-analysis-aggregated", tags=["Document Analysis Aggregated"])
 
 # FastAPI app instance is exported for use by uvicorn
 # Server startup is handled by main.py at the project root
