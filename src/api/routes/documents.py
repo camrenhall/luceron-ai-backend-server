@@ -232,7 +232,9 @@ async def update_document(
     start_time = time.time()
     db_pool = get_db_pool()
     
-    logger.info(f"Updating document {document_id}: {dict(request)}")
+    logger.info(f"Document update request - document_id: {document_id}")
+    logger.info(f"Request data: {request.dict()}")
+    logger.debug(f"Request JSON representation: {request.json()}")
     
     # Validate at least one field is provided for update
     update_data = request.dict(exclude_unset=True)
