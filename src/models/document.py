@@ -28,7 +28,6 @@ class DocumentAnalysisData(BaseModel):
     analysis_id: UUID
     document_id: UUID
     case_id: UUID
-    workflow_id: Optional[UUID] = Field(None, description="Internal agent workflow UUID (not used for AWS workflows)")
     analysis_content: str
     analysis_status: AnalysisStatus = AnalysisStatus.COMPLETED
     model_used: str

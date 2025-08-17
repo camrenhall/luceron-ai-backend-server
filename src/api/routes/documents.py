@@ -614,7 +614,7 @@ async def get_document_analysis(
     try:
         async with db_pool.acquire() as conn:
             analysis_row = await conn.fetchrow("""
-                SELECT analysis_id, document_id, case_id, workflow_id, analysis_content,
+                SELECT analysis_id, document_id, case_id, analysis_content,
                        analysis_status, model_used, tokens_used, analyzed_at, created_at
                 FROM document_analysis 
                 WHERE document_id = $1
