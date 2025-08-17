@@ -22,6 +22,7 @@ class WorkflowStateData(BaseModel):
     status: WorkflowStatus = WorkflowStatus.PENDING
     initial_prompt: str
     reasoning_chain: List[Dict[str, Any]] = []
+    final_response: Optional[str] = None
     created_at: datetime
 
 class WorkflowCreateRequest(BaseModel):
@@ -36,3 +37,4 @@ class WorkflowStatusRequest(BaseModel):
 class WorkflowUpdateRequest(BaseModel):
     status: Optional[WorkflowStatus] = None
     reasoning_chain: Optional[List[Dict[str, Any]]] = None
+    final_response: Optional[str] = None

@@ -8,7 +8,7 @@ import re
 from fastapi import APIRouter, HTTPException, Depends
 import asyncpg
 
-from models.workflow import WorkflowCreateRequest, WorkflowStatusRequest, ReasoningStep
+from models.workflow import WorkflowCreateRequest, WorkflowStatusRequest, WorkflowUpdateRequest, ReasoningStep
 from database.connection import get_db_pool
 from utils.auth import AuthConfig
 
@@ -45,6 +45,7 @@ async def create_workflow(
                 "status": request.status.value,
                 "initial_prompt": request.initial_prompt,
                 "reasoning_chain": [],
+                "final_response": None,
                 "created_at": row['created_at'].isoformat() if row['created_at'] else None
             }
             
@@ -86,6 +87,7 @@ async def get_workflow(
                 "status": row['status'],
                 "initial_prompt": row['initial_prompt'],
                 "reasoning_chain": reasoning_chain,
+                "final_response": row['final_response'],
                 "created_at": row['created_at'].isoformat()
             }
             
@@ -121,6 +123,60 @@ async def update_workflow_status(
             
     except Exception as e:
         logger.error(f"Failed to update workflow status: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.put("/{workflow_id}")
+async def update_workflow(
+    workflow_id: str,
+    request: WorkflowUpdateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """Update workflow fields"""
+    db_pool = get_db_pool()
+    
+    # Validate UUID format
+    uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+    if not uuid_pattern.match(workflow_id):
+        raise HTTPException(status_code=400, detail=f"Invalid workflow_id format. Expected UUID, got: {workflow_id}")
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Build dynamic update query based on provided fields
+            update_fields = []
+            update_values = []
+            param_count = 1
+            
+            if request.status is not None:
+                update_fields.append(f"status = ${param_count}")
+                update_values.append(request.status.value)
+                param_count += 1
+                
+            if request.reasoning_chain is not None:
+                update_fields.append(f"reasoning_chain = ${param_count}")
+                update_values.append(json.dumps(request.reasoning_chain))
+                param_count += 1
+                
+            if request.final_response is not None:
+                update_fields.append(f"final_response = ${param_count}")
+                update_values.append(request.final_response)
+                param_count += 1
+            
+            if not update_fields:
+                raise HTTPException(status_code=400, detail="No fields provided for update")
+            
+            # Add workflow_id as the final parameter
+            update_values.append(workflow_id)
+            query = f"UPDATE workflow_states SET {', '.join(update_fields)} WHERE workflow_id = ${param_count}"
+            
+            result = await conn.execute(query, *update_values)
+            
+            if result == "UPDATE 0":
+                raise HTTPException(status_code=404, detail="Workflow not found")
+            
+            return {"status": "updated", "workflow_id": workflow_id}
+            
+    except Exception as e:
+        logger.error(f"Failed to update workflow: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.post("/{workflow_id}/reasoning-step")

@@ -34,6 +34,7 @@ class DocumentAnalysisData(BaseModel):
     tokens_used: Optional[int] = None
     analyzed_at: datetime
     created_at: datetime
+    analysis_reasoning: Optional[str] = None
 
 class AnalysisResultRequest(BaseModel):
     document_id: UUID
@@ -42,6 +43,7 @@ class AnalysisResultRequest(BaseModel):
     model_used: str = "o3"
     tokens_used: Optional[int] = None
     analysis_status: AnalysisStatus = AnalysisStatus.COMPLETED
+    analysis_reasoning: Optional[str] = None
 
 class AnalysisResultResponse(BaseModel):
     analysis_id: UUID
@@ -117,6 +119,7 @@ class BulkAnalysisRecord(BaseModel):
     model_used: str = Field(..., description="Model identifier used for analysis")
     tokens_used: Optional[int] = Field(None, ge=0, description="Number of tokens consumed")
     analyzed_at: datetime = Field(..., description="ISO timestamp when analysis was performed")
+    analysis_reasoning: Optional[str] = Field(None, description="Reasoning behind the analysis process")
     
     @validator('analysis_content')
     def validate_analysis_content(cls, v):
@@ -135,6 +138,12 @@ class BulkAnalysisRecord(BaseModel):
         if not v or not v.strip():
             raise ValueError('model_used cannot be empty')
         return v.strip()
+    
+    @validator('analysis_reasoning')
+    def validate_analysis_reasoning(cls, v):
+        if v is not None and not v.strip():
+            raise ValueError('analysis_reasoning cannot be empty string')
+        return v.strip() if v else v
 
 
 class BulkAnalysisRequest(BaseModel):
@@ -266,6 +275,7 @@ class DocumentAnalysisUpdateRequest(BaseModel):
     analysis_status: Optional[AnalysisStatus] = Field(None, description="Updated analysis status")
     model_used: Optional[str] = Field(None, description="Updated model identifier")
     tokens_used: Optional[int] = Field(None, ge=0, description="Updated token count")
+    analysis_reasoning: Optional[str] = Field(None, description="Updated reasoning behind the analysis process")
     
     @validator('analysis_content')
     def validate_analysis_content(cls, v):
@@ -283,6 +293,12 @@ class DocumentAnalysisUpdateRequest(BaseModel):
     def validate_model_used(cls, v):
         if v is not None and (not v or not v.strip()):
             raise ValueError('model_used cannot be empty string')
+        return v.strip() if v else v
+    
+    @validator('analysis_reasoning')
+    def validate_analysis_reasoning(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('analysis_reasoning cannot be empty string')
         return v.strip() if v else v
     
     class Config:

@@ -490,13 +490,13 @@ async def bulk_store_document_analysis(
                         analysis_id = await conn.fetchval("""
                             INSERT INTO document_analysis 
                             (document_id, case_id, analysis_content, 
-                             analysis_status, model_used, tokens_used, analyzed_at)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                             analysis_status, model_used, tokens_used, analyzed_at, analysis_reasoning)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                             RETURNING analysis_id
                         """, 
                         analysis.document_id, analysis.case_id,
                         analysis.analysis_content, analysis.analysis_status, 
-                        analysis.model_used, analysis.tokens_used, analysis.analyzed_at)
+                        analysis.model_used, analysis.tokens_used, analysis.analyzed_at, analysis.analysis_reasoning)
                         
                         # Update document status to completed
                         await conn.execute("""
@@ -581,13 +581,13 @@ async def store_document_analysis(
             analysis_id = await conn.fetchval("""
                 INSERT INTO document_analysis 
                 (document_id, case_id, analysis_content, 
-                 analysis_status, model_used, tokens_used, analyzed_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 analysis_status, model_used, tokens_used, analyzed_at, analysis_reasoning)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING analysis_id
             """, 
             document_id, request.case_id,
             request.analysis_content, request.analysis_status, request.model_used,
-            request.tokens_used, datetime.utcnow())
+            request.tokens_used, datetime.utcnow(), request.analysis_reasoning)
             
             # Update document status to completed
             await conn.execute(
@@ -623,7 +623,7 @@ async def get_document_analysis(
         async with db_pool.acquire() as conn:
             analysis_row = await conn.fetchrow("""
                 SELECT analysis_id, document_id, case_id, analysis_content,
-                       analysis_status, model_used, tokens_used, analyzed_at, created_at
+                       analysis_status, model_used, tokens_used, analyzed_at, created_at, analysis_reasoning
                 FROM document_analysis 
                 WHERE document_id = $1
                 ORDER BY analyzed_at DESC
@@ -718,7 +718,7 @@ async def get_all_analyses_by_case(
                 query = """
                     SELECT da.analysis_id, da.document_id, da.case_id, 
                            da.analysis_content, da.analysis_status, da.model_used,
-                           da.tokens_used, da.analyzed_at, da.created_at,
+                           da.tokens_used, da.analyzed_at, da.created_at, da.analysis_reasoning,
                            d.original_file_name
                     FROM document_analysis da
                     JOIN documents d ON da.document_id = d.document_id
@@ -757,7 +757,8 @@ async def get_all_analyses_by_case(
                     model_used=row['model_used'],
                     tokens_used=row['tokens_used'],
                     analyzed_at=row['analyzed_at'],
-                    created_at=row['created_at']
+                    created_at=row['created_at'],
+                    analysis_reasoning=row.get('analysis_reasoning')
                 )
                 analyses.append(analysis_data)
             
