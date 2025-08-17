@@ -434,25 +434,37 @@ async def bulk_store_document_analysis(
                     document_ids.add(str(analysis.document_id))
                     case_ids.add(str(analysis.case_id))
                 
-                # Batch validate document existence
+                # Enhanced debug logging for the specific failing case
+                logger.info(f"Validating document IDs: {list(document_ids)}")
+                logger.info(f"Validating case IDs: {list(case_ids)}")
+                
+                # Batch validate document existence - compare as text to avoid type casting issues
                 existing_documents = await conn.fetch("""
                     SELECT document_id::text as document_id 
                     FROM documents 
-                    WHERE document_id = ANY($1::uuid[])
+                    WHERE document_id::text = ANY($1)
                 """, list(document_ids))
                 
                 # Ensure consistent string comparison - convert all UUIDs to strings
                 valid_document_ids = {str(doc['document_id']) for doc in existing_documents}
                 
-                # Batch validate case existence
+                # Debug: Log what documents were found
+                logger.info(f"Found {len(existing_documents)} documents in database")
+                logger.info(f"Valid document IDs: {list(valid_document_ids)}")
+                
+                # Batch validate case existence - compare as text to avoid type casting issues
                 existing_cases = await conn.fetch("""
                     SELECT case_id::text as case_id 
                     FROM cases 
-                    WHERE case_id = ANY($1::uuid[])
+                    WHERE case_id::text = ANY($1)
                 """, list(case_ids))
                 
                 # Ensure consistent string comparison - convert all UUIDs to strings
                 valid_case_ids = {str(case['case_id']) for case in existing_cases}
+                
+                # Debug: Log what cases were found
+                logger.info(f"Found {len(existing_cases)} cases in database")
+                logger.info(f"Valid case IDs: {list(valid_case_ids)}")
                 
                 logger.info(f"Validated {len(valid_document_ids)} documents and "
                            f"{len(valid_case_ids)} cases from batch")
@@ -654,6 +666,70 @@ async def get_document_analysis(
     except Exception as e:
         logger.error(f"Failed to get analysis result: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.get("/{document_id}/validate")
+async def validate_document_exists(
+    document_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """
+    Diagnostic endpoint to validate if a document exists in the database.
+    Useful for troubleshooting 404 errors in bulk analysis endpoint.
+    """
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Check if document exists using the exact same logic as bulk analysis
+            doc_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id::text = $1)", 
+                document_id
+            )
+            
+            if doc_exists:
+                # Get document details for debugging
+                doc_details = await conn.fetchrow("""
+                    SELECT document_id::text as document_id, case_id::text as case_id, 
+                           original_file_name, status, created_at
+                    FROM documents 
+                    WHERE document_id::text = $1
+                """, document_id)
+                
+                return {
+                    "exists": True,
+                    "document_id": document_id,
+                    "validation_query": "document_id::text = $1",
+                    "details": dict(doc_details) if doc_details else None,
+                    "message": "Document found in database"
+                }
+            else:
+                # Check if it exists with UUID casting (for comparison)
+                try:
+                    uuid_exists = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id = $1::uuid)", 
+                        document_id
+                    )
+                except Exception:
+                    uuid_exists = False
+                
+                return {
+                    "exists": False,
+                    "document_id": document_id,
+                    "validation_query": "document_id::text = $1",
+                    "uuid_cast_exists": uuid_exists,
+                    "message": "Document not found with text comparison",
+                    "debug_info": "Check if document was created in same database instance"
+                }
+                
+    except Exception as e:
+        logger.error(f"Document validation failed for {document_id}: {e}")
+        return {
+            "exists": False,
+            "document_id": document_id,
+            "error": str(e),
+            "message": "Validation query failed"
+        }
+
 
 @router.get("/{document_id}")
 async def get_document(
