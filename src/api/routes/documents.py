@@ -6,7 +6,7 @@ import logging
 import time
 import re
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends
 
 from models.document import (
