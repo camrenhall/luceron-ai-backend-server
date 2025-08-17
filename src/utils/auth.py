@@ -82,4 +82,4 @@ class AuthConfig:
     @staticmethod
     def get_auth_dependency():
         """Get the mandatory auth dependency for all endpoints"""
-        return Depends(authenticate_api)
+        return authenticate_api
