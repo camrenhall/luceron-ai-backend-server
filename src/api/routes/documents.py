@@ -492,10 +492,10 @@ async def bulk_store_document_analysis(
                         analysis.analysis_content, analysis.analysis_status, 
                         analysis.model_used, analysis.tokens_used, analysis.analyzed_at)
                         
-                        # Update document status to analyzed
+                        # Update document status to completed
                         await conn.execute("""
                             UPDATE documents 
-                            SET status = 'analyzed' 
+                            SET status = 'completed' 
                             WHERE document_id = $1
                         """, analysis.document_id)
                         
@@ -583,9 +583,9 @@ async def store_document_analysis(
             request.analysis_content, request.analysis_status, request.model_used,
             request.tokens_used, datetime.utcnow())
             
-            # Update document status to analyzed
+            # Update document status to completed
             await conn.execute(
-                "UPDATE documents SET status = 'analyzed' WHERE document_id = $1",
+                "UPDATE documents SET status = 'completed' WHERE document_id = $1",
                 document_id
             )
             

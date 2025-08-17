@@ -41,7 +41,7 @@ This API provides endpoints for creating and updating document records as part o
 
 **Optional Fields:**
 - `batch_id` (string, max 255 chars)
-- `status` (enum: uploaded|analyzing|analyzed|failed, default: "uploaded")
+- `status` (enum: uploaded|converted|analyzing|completed|failed, default: "uploaded")
 
 **Success Response (201):**
 ```json
@@ -86,7 +86,7 @@ This API provides endpoints for creating and updating document records as part o
 - `processed_file_size` (integer, > 0)
 - `processed_s3_location` (string)
 - `processed_s3_key` (string, max 1000 chars)
-- `status` (enum: uploaded|analyzing|analyzed|failed)
+- `status` (enum: uploaded|converted|analyzing|completed|failed)
 
 **Success Response (200):**
 ```json
@@ -138,7 +138,7 @@ response = requests.put(
         "processed_file_size": converted_size,
         "processed_s3_location": processed_bucket,
         "processed_s3_key": processed_key,
-        "status": "analyzing"
+        "status": "converted"
     }
 )
 ```
@@ -165,7 +165,7 @@ response = requests.post(
 requests.put(
     f"https://api.example.com/api/documents/{document_id}",
     headers={"Authorization": "Bearer your-api-key"},
-    json={"status": "analyzed"}
+    json={"status": "completed"}
 )
 ```
 
@@ -174,9 +174,10 @@ requests.put(
 Documents follow this status progression:
 
 1. `uploaded` → Initial state when document record is created
-2. `analyzing` → File is being processed (PNG conversion, analysis)
-3. `analyzed` → Processing and analysis completed successfully
-4. `failed` → Processing or analysis failed
+2. `converted` → File has been converted to PNG format
+3. `analyzing` → File is being analyzed by AI models
+4. `completed` → Processing and analysis completed successfully
+5. `failed` → Processing or analysis failed
 
 ## Database Schema Mapping
 

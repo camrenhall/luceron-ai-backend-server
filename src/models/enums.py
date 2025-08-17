@@ -34,8 +34,9 @@ class WorkflowStatus(str, Enum):
 # Document-related enums
 class DocumentStatus(str, Enum):
     UPLOADED = "uploaded"
+    CONVERTED = "converted"
     ANALYZING = "analyzing"
-    ANALYZED = "analyzed"
+    COMPLETED = "completed"
     FAILED = "failed"
 
 class AnalysisStatus(str, Enum):
