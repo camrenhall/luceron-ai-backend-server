@@ -18,7 +18,11 @@ from models.document import (
     BulkAnalysisRequest,
     BulkAnalysisResponse,
     AnalysisFailure,
-    BulkAnalysisRecord
+    BulkAnalysisRecord,
+    DocumentCreateRequest,
+    DocumentCreateResponse,
+    DocumentUpdateRequest,
+    DocumentUpdateResponse
 )
 from database.connection import get_db_pool
 from utils.auth import AuthConfig
@@ -123,6 +127,188 @@ def find_best_document_match(pattern: str, documents: List[Dict[str, Any]]) -> O
         return best_match
     
     return None
+
+
+@router.post("", response_model=DocumentCreateResponse)
+async def create_document(
+    request: DocumentCreateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """
+    Create a new document record (Upload Time).
+    
+    This endpoint is used by AWS State Machine when a file is first uploaded
+    to create the initial document record with original file metadata.
+    """
+    start_time = time.time()
+    db_pool = get_db_pool()
+    
+    logger.info(f"Creating document record: file={request.original_file_name}, "
+                f"case_id={request.case_id}, batch_id={request.batch_id}")
+    
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                # Validate case exists
+                case_exists = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
+                    request.case_id
+                )
+                if not case_exists:
+                    raise HTTPException(
+                        status_code=404, 
+                        detail=f"Case {request.case_id} not found"
+                    )
+                
+                # Insert document record and get generated UUID
+                document_id = await conn.fetchval("""
+                    INSERT INTO documents (
+                        case_id, original_file_name, original_file_size, 
+                        original_file_type, original_s3_location, original_s3_key,
+                        batch_id, status
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    RETURNING document_id
+                """, 
+                request.case_id, request.original_file_name, request.original_file_size,
+                request.original_file_type, request.original_s3_location, 
+                request.original_s3_key, request.batch_id, request.status)
+                
+                # Get the created timestamp
+                created_at = await conn.fetchval(
+                    "SELECT created_at FROM documents WHERE document_id = $1",
+                    document_id
+                )
+                
+                processing_time = int((time.time() - start_time) * 1000)
+                
+                logger.info(f"Document created successfully: document_id={document_id}, "
+                           f"processing_time={processing_time}ms")
+                
+                return DocumentCreateResponse(
+                    success=True,
+                    document_id=document_id,
+                    case_id=request.case_id,
+                    original_file_name=request.original_file_name,
+                    status=request.status,
+                    created_at=created_at
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        processing_time = int((time.time() - start_time) * 1000)
+        logger.error(f"Document creation failed: {e}, processing_time={processing_time}ms")
+        
+        # Check for constraint violations
+        if "foreign key constraint" in str(e).lower():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid case_id: {request.case_id}"
+            )
+        elif "duplicate key" in str(e).lower():
+            raise HTTPException(
+                status_code=409,
+                detail="Document with same identifiers already exists"
+            )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Document creation failed: {str(e)}"
+            )
+
+
+@router.put("/{document_id}", response_model=DocumentUpdateResponse)
+async def update_document(
+    document_id: str,
+    request: DocumentUpdateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """
+    Update document record (Processing Time).
+    
+    This endpoint is used by AWS State Machine to update document records
+    with processed file metadata and status changes during the pipeline.
+    """
+    start_time = time.time()
+    db_pool = get_db_pool()
+    
+    logger.info(f"Updating document {document_id}: {dict(request)}")
+    
+    # Validate at least one field is provided for update
+    update_data = request.dict(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one field must be provided for update"
+        )
+    
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                # Verify document exists
+                doc_exists = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id = $1)", 
+                    document_id
+                )
+                if not doc_exists:
+                    raise HTTPException(
+                        status_code=404, 
+                        detail=f"Document {document_id} not found"
+                    )
+                
+                # Build dynamic update query
+                set_clauses = []
+                values = []
+                param_counter = 1
+                
+                for field, value in update_data.items():
+                    if value is not None:
+                        set_clauses.append(f"{field} = ${param_counter}")
+                        values.append(value)
+                        param_counter += 1
+                
+                if not set_clauses:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No valid fields provided for update"
+                    )
+                
+                # Add document_id as final parameter
+                values.append(document_id)
+                
+                query = f"""
+                    UPDATE documents 
+                    SET {', '.join(set_clauses)}
+                    WHERE document_id = ${param_counter}
+                    RETURNING status
+                """
+                
+                updated_status = await conn.fetchval(query, *values)
+                
+                processing_time = int((time.time() - start_time) * 1000)
+                updated_fields = list(update_data.keys())
+                
+                logger.info(f"Document updated successfully: document_id={document_id}, "
+                           f"fields={updated_fields}, processing_time={processing_time}ms")
+                
+                return DocumentUpdateResponse(
+                    success=True,
+                    document_id=document_id,
+                    updated_fields=updated_fields,
+                    status=updated_status,
+                    updated_at=datetime.utcnow()
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        processing_time = int((time.time() - start_time) * 1000)
+        logger.error(f"Document update failed: {e}, processing_time={processing_time}ms")
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Document update failed: {str(e)}"
+        )
 
 
 @router.post("/lookup-by-batch", response_model=DocumentLookupResponse)

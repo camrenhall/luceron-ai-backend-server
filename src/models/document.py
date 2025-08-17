@@ -169,3 +169,93 @@ class BulkAnalysisResponse(BaseModel):
     failed_count: int = 0
     failed_records: Optional[List[AnalysisFailure]] = None
     processing_time_ms: Optional[int] = None
+
+
+# Document Management Models
+
+class DocumentCreateRequest(BaseModel):
+    """Request model for creating a new document record (Upload Time)"""
+    case_id: UUID = Field(..., description="Case UUID that this document belongs to")
+    original_file_name: str = Field(..., max_length=500, description="Original filename")
+    original_file_size: int = Field(..., gt=0, description="File size in bytes")
+    original_file_type: str = Field(..., max_length=100, description="MIME type or file extension")
+    original_s3_location: str = Field(..., description="S3 bucket/region location")
+    original_s3_key: str = Field(..., max_length=1000, description="S3 object key")
+    batch_id: Optional[str] = Field(None, max_length=255, description="Optional batch identifier")
+    status: DocumentStatus = Field(DocumentStatus.UPLOADED, description="Initial document status")
+    
+    @validator('original_file_name')
+    def validate_filename(cls, v):
+        if not v or not v.strip():
+            raise ValueError('original_file_name cannot be empty')
+        return v.strip()
+    
+    @validator('original_file_type')
+    def validate_file_type(cls, v):
+        if not v or not v.strip():
+            raise ValueError('original_file_type cannot be empty')
+        return v.strip()
+    
+    @validator('original_s3_location')
+    def validate_s3_location(cls, v):
+        if not v or not v.strip():
+            raise ValueError('original_s3_location cannot be empty')
+        return v.strip()
+    
+    @validator('original_s3_key')
+    def validate_s3_key(cls, v):
+        if not v or not v.strip():
+            raise ValueError('original_s3_key cannot be empty')
+        return v.strip()
+
+
+class DocumentUpdateRequest(BaseModel):
+    """Request model for updating document record (Processing Time)"""
+    processed_file_name: Optional[str] = Field(None, max_length=500, description="Processed filename (e.g., PNG)")
+    processed_file_size: Optional[int] = Field(None, gt=0, description="Processed file size in bytes")
+    processed_s3_location: Optional[str] = Field(None, description="Processed file S3 location")
+    processed_s3_key: Optional[str] = Field(None, max_length=1000, description="Processed file S3 key")
+    status: Optional[DocumentStatus] = Field(None, description="Updated document status")
+    
+    @validator('processed_file_name')
+    def validate_processed_filename(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('processed_file_name cannot be empty string')
+        return v.strip() if v else v
+    
+    @validator('processed_s3_location')
+    def validate_processed_s3_location(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('processed_s3_location cannot be empty string')
+        return v.strip() if v else v
+    
+    @validator('processed_s3_key')
+    def validate_processed_s3_key(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('processed_s3_key cannot be empty string')
+        return v.strip() if v else v
+    
+    class Config:
+        # Ensure at least one field is provided for update
+        extra = "forbid"
+
+
+class DocumentCreateResponse(BaseModel):
+    """Response model for document creation"""
+    success: bool
+    document_id: UUID
+    case_id: UUID
+    original_file_name: str
+    status: DocumentStatus
+    created_at: datetime
+    message: str = "Document record created successfully"
+
+
+class DocumentUpdateResponse(BaseModel):
+    """Response model for document update"""
+    success: bool
+    document_id: UUID
+    updated_fields: List[str]
+    status: DocumentStatus
+    updated_at: datetime
+    message: str = "Document record updated successfully"
