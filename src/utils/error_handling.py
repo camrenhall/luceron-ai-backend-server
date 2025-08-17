@@ -12,9 +12,7 @@ from typing import Any, Dict, Optional, Union
 from contextvars import ContextVar
 
 from fastapi import Request, HTTPException
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 # Context variables for request tracing
@@ -278,7 +276,6 @@ def setup_error_handling(app):
     app.add_middleware(RequestContextMiddleware)
     
     # Add exception handlers
-    app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
     
