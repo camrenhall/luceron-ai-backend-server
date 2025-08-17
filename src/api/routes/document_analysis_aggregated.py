@@ -2,6 +2,7 @@
 Document Analysis Aggregated API routes
 """
 
+import json
 import logging
 import time
 from datetime import datetime
@@ -56,14 +57,15 @@ async def create_aggregated_analysis(
                     )
                 
                 # Insert aggregated analysis record and get generated UUID
+                # Convert dict to JSON string for JSONB column
                 aggregated_analysis_id = await conn.fetchval("""
                     INSERT INTO document_analysis_aggregated (
                         case_id, analysis_batch_contents, model_used, 
                         total_documents_analyzed, total_tokens_used
-                    ) VALUES ($1, $2, $3, $4, $5)
+                    ) VALUES ($1, $2::jsonb, $3, $4, $5)
                     RETURNING aggregated_analysis_id
                 """, 
-                request.case_id, request.analysis_batch_contents, request.model_used,
+                request.case_id, json.dumps(request.analysis_batch_contents), request.model_used,
                 request.total_documents_analyzed, request.total_tokens_used)
                 
                 # Get the created timestamp
@@ -230,8 +232,13 @@ async def update_aggregated_analysis(
                 param_count = 1
                 
                 for field, value in update_data.items():
-                    set_clauses.append(f"{field} = ${param_count}")
-                    values.append(value)
+                    # Special handling for JSONB field
+                    if field == 'analysis_batch_contents':
+                        set_clauses.append(f"{field} = ${param_count}::jsonb")
+                        values.append(json.dumps(value))
+                    else:
+                        set_clauses.append(f"{field} = ${param_count}")
+                        values.append(value)
                     param_count += 1
                 
                 # Add aggregated_analysis_id as the last parameter
