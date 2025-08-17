@@ -145,9 +145,9 @@ response = requests.put(
 
 ### Phase 3: Analysis Complete
 ```python
-# AWS State Machine calls existing bulk analysis endpoint
+# AWS State Machine calls bulk analysis endpoint
 response = requests.post(
-    "https://api.example.com/api/document-analysis/bulk",
+    "https://api.example.com/api/documents/analysis/bulk",
     headers={"Authorization": "Bearer your-api-key"},
     json={
         "analyses": [{

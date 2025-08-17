@@ -418,7 +418,7 @@ async def bulk_store_document_analysis(
     start_time = time.time()
     db_pool = get_db_pool()
     
-    logger.info(f"Starting bulk analysis storage for {len(request.analyses)} records")
+    logger.info(f"Processing bulk analysis: {len(request.analyses)} records")
     
     try:
         async with db_pool.acquire() as conn:
@@ -426,52 +426,32 @@ async def bulk_store_document_analysis(
                 inserted_count = 0
                 failed_records: List[AnalysisFailure] = []
                 
-                # Pre-validate all records and collect unique IDs for existence checks
-                document_ids = set()
-                case_ids = set()
+                # Collect unique IDs for batch validation
+                document_ids = {str(analysis.document_id) for analysis in request.analyses}
+                case_ids = {str(analysis.case_id) for analysis in request.analyses}
                 
-                for i, analysis in enumerate(request.analyses):
-                    document_ids.add(str(analysis.document_id))
-                    case_ids.add(str(analysis.case_id))
+                logger.debug(f"Validating {len(document_ids)} documents, {len(case_ids)} cases")
                 
-                # Enhanced debug logging for the specific failing case
-                logger.info(f"Validating document IDs: {list(document_ids)}")
-                logger.info(f"Validating case IDs: {list(case_ids)}")
-                
-                # Batch validate document existence - compare as text to avoid type casting issues
+                # Batch validate document existence
                 existing_documents = await conn.fetch("""
                     SELECT document_id::text as document_id 
                     FROM documents 
                     WHERE document_id::text = ANY($1)
                 """, list(document_ids))
                 
-                # Ensure consistent string comparison - convert all UUIDs to strings
                 valid_document_ids = {str(doc['document_id']) for doc in existing_documents}
                 
-                # Debug: Log what documents were found
-                logger.info(f"Found {len(existing_documents)} documents in database")
-                logger.info(f"Valid document IDs: {list(valid_document_ids)}")
-                
-                # Batch validate case existence - compare as text to avoid type casting issues
+                # Batch validate case existence
                 existing_cases = await conn.fetch("""
                     SELECT case_id::text as case_id 
                     FROM cases 
                     WHERE case_id::text = ANY($1)
                 """, list(case_ids))
                 
-                # Ensure consistent string comparison - convert all UUIDs to strings
                 valid_case_ids = {str(case['case_id']) for case in existing_cases}
                 
-                # Debug: Log what cases were found
-                logger.info(f"Found {len(existing_cases)} cases in database")
-                logger.info(f"Valid case IDs: {list(valid_case_ids)}")
-                
-                logger.info(f"Validated {len(valid_document_ids)} documents and "
-                           f"{len(valid_case_ids)} cases from batch")
-                
-                # Debug logging for UUID validation
-                logger.debug(f"Valid document IDs: {list(valid_document_ids)[:5]}...")  # Log first 5
-                logger.debug(f"Valid case IDs: {list(valid_case_ids)[:5]}...")  # Log first 5
+                logger.info(f"Validation complete: {len(valid_document_ids)}/{len(document_ids)} documents, "
+                           f"{len(valid_case_ids)}/{len(case_ids)} cases found")
                 
                 # Process each analysis record
                 for i, analysis in enumerate(request.analyses):
@@ -479,12 +459,9 @@ async def bulk_store_document_analysis(
                         analysis_doc_id = str(analysis.document_id)
                         analysis_case_id = str(analysis.case_id)
                         
-                        # Enhanced debug logging for troubleshooting
-                        logger.debug(f"Processing analysis {i}: document_id={analysis_doc_id}, case_id={analysis_case_id}")
-                        
                         # Validate document exists
                         if analysis_doc_id not in valid_document_ids:
-                            logger.warning(f"Document validation failed: {analysis_doc_id} not in {len(valid_document_ids)} valid documents")
+                            logger.warning(f"Document not found: {analysis_doc_id}")
                             failed_records.append(AnalysisFailure(
                                 index=i,
                                 record_id=analysis_doc_id,
@@ -495,7 +472,7 @@ async def bulk_store_document_analysis(
                         
                         # Validate case exists
                         if analysis_case_id not in valid_case_ids:
-                            logger.warning(f"Case validation failed: {analysis_case_id} not in {len(valid_case_ids)} valid cases")
+                            logger.warning(f"Case not found: {analysis_case_id}")
                             failed_records.append(AnalysisFailure(
                                 index=i,
                                 record_id=analysis_case_id,
@@ -525,10 +502,8 @@ async def bulk_store_document_analysis(
                         
                         inserted_count += 1
                         
-                        logger.debug(f"Stored analysis {analysis_id} for document {analysis_doc_id}")
-                        
                     except Exception as record_error:
-                        logger.warning(f"Failed to store analysis record at index {i}: {record_error}")
+                        logger.error(f"Failed to store analysis record {i}: {record_error}")
                         failed_records.append(AnalysisFailure(
                             index=i,
                             record_id=analysis_doc_id,
@@ -543,11 +518,12 @@ async def bulk_store_document_analysis(
                 success = len(failed_records) == 0
                 failed_count = len(failed_records)
                 
-                logger.info(f"Bulk analysis storage completed: {inserted_count} inserted, "
-                           f"{failed_count} failed in {processing_time}ms")
+                logger.info(f"Bulk analysis complete: {inserted_count} inserted, "
+                           f"{failed_count} failed ({processing_time}ms)")
                 
                 if failed_records:
-                    logger.warning(f"Failed records summary: {[f.error_code for f in failed_records]}")
+                    error_codes = [f.error_code for f in failed_records]
+                    logger.warning(f"Failed records: {error_codes}")
                 
                 return BulkAnalysisResponse(
                     success=success,
