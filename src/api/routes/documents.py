@@ -6,7 +6,7 @@ import logging
 import time
 import re
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 
 from models.document import (
@@ -128,7 +128,7 @@ def find_best_document_match(pattern: str, documents: List[Dict[str, Any]]) -> O
 @router.post("/lookup-by-batch", response_model=DocumentLookupResponse)
 async def lookup_documents_by_batch(
     request: DocumentLookupRequest,
-    _: Optional[bool] = Depends(AuthConfig.get_auth_dependency())
+    _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """
     Lookup documents by batch ID and match processed files to original documents.
@@ -221,7 +221,7 @@ async def lookup_documents_by_batch(
 @router.post("/analysis/bulk", response_model=BulkAnalysisResponse)
 async def bulk_store_document_analysis(
     request: BulkAnalysisRequest,
-    _: Optional[bool] = Depends(AuthConfig.get_auth_dependency())
+    _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """
     Bulk store document analysis results with optimized PostgreSQL operations.
@@ -358,7 +358,11 @@ async def bulk_store_document_analysis(
 
 
 @router.post("/{document_id}/analysis", response_model=AnalysisResultResponse)
-async def store_document_analysis(document_id: str, request: AnalysisResultRequest):
+async def store_document_analysis(
+    document_id: str, 
+    request: AnalysisResultRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Store document analysis results"""
     db_pool = get_db_pool()
     
@@ -415,7 +419,10 @@ async def store_document_analysis(document_id: str, request: AnalysisResultReque
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/{document_id}/analysis")
-async def get_document_analysis(document_id: str):
+async def get_document_analysis(
+    document_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Get analysis results for a document"""
     db_pool = get_db_pool()
     
@@ -449,7 +456,10 @@ async def get_document_analysis(document_id: str):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/{document_id}")
-async def get_document(document_id: str):
+async def get_document(
+    document_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Get document metadata by document ID"""
     db_pool = get_db_pool()
     

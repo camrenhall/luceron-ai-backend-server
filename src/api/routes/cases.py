@@ -4,17 +4,21 @@ Case management API routes
 
 import logging
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 import asyncpg
 
 from models.case import CaseCreateRequest
 from database.connection import get_db_pool
+from utils.auth import AuthConfig
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.post("")
-async def create_case(request: CaseCreateRequest):
+async def create_case(
+    request: CaseCreateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Create a new case"""
     db_pool = get_db_pool()
     
@@ -72,7 +76,10 @@ async def create_case(request: CaseCreateRequest):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/{case_id}")
-async def get_case(case_id: str):
+async def get_case(
+    case_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Get case details"""
     db_pool = get_db_pool()
     
@@ -131,7 +138,10 @@ async def get_case(case_id: str):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/{case_id}/communications")
-async def get_case_communications(case_id: str):
+async def get_case_communications(
+    case_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Get communication history for a case"""
     db_pool = get_db_pool()
     
@@ -208,7 +218,10 @@ async def get_case_communications(case_id: str):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/{case_id}/analysis-summary")
-async def get_case_analysis_summary(case_id: str):
+async def get_case_analysis_summary(
+    case_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Get analysis summary for all documents in a case"""
     db_pool = get_db_pool()
     
@@ -255,7 +268,9 @@ async def get_case_analysis_summary(case_id: str):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/pending-reminders")
-async def get_pending_reminder_cases():
+async def get_pending_reminder_cases(
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Get cases that need reminder emails"""
     db_pool = get_db_pool()
     

@@ -22,6 +22,8 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 if not RESEND_API_KEY:
     raise ValueError("RESEND_API_KEY environment variable is required")
+if not API_KEY:
+    raise ValueError("API_KEY environment variable is required for authentication")
 
 # Configure Resend
 resend.api_key = RESEND_API_KEY

@@ -58,27 +58,28 @@ async def authenticate_api(authorization: Optional[str] = Header(None)):
     return True
 
 
-def optional_auth():
+def require_auth():
     """
-    Optional authentication dependency that can be easily added/removed from endpoints.
+    Mandatory authentication dependency for all API endpoints.
     
     Usage:
-        @router.post("/endpoint", dependencies=[Depends(optional_auth)])
+        @router.post("/endpoint", dependencies=[Depends(require_auth)])
     """
-    return Depends(authenticate_api) if API_KEY else None
+    return Depends(authenticate_api)
 
 
 class AuthConfig:
     """
     Centralized authentication configuration for the application.
+    All endpoints now require authentication.
     """
     
     @staticmethod
     def is_auth_enabled() -> bool:
-        """Check if authentication is enabled (API_KEY is set)"""
-        return bool(API_KEY)
+        """Authentication is always enabled - API_KEY is required"""
+        return True
     
     @staticmethod
     def get_auth_dependency():
-        """Get the appropriate auth dependency based on configuration"""
-        return Depends(authenticate_api) if AuthConfig.is_auth_enabled() else None
+        """Get the mandatory auth dependency for all endpoints"""
+        return Depends(authenticate_api)

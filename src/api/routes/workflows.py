@@ -5,17 +5,21 @@ Workflow management API routes
 import json
 import logging
 import re
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 import asyncpg
 
 from models.workflow import WorkflowCreateRequest, WorkflowStatusRequest, ReasoningStep
 from database.connection import get_db_pool
+from utils.auth import AuthConfig
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.post("")
-async def create_workflow(request: WorkflowCreateRequest):
+async def create_workflow(
+    request: WorkflowCreateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Create a new workflow"""
     logger.info(f"POST workflow request received: agent_type='{request.agent_type}', case_id='{request.case_id}', status='{request.status.value}'")
     db_pool = get_db_pool()
@@ -51,7 +55,10 @@ async def create_workflow(request: WorkflowCreateRequest):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/{workflow_id}")
-async def get_workflow(workflow_id: str):
+async def get_workflow(
+    workflow_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Get workflow by ID"""
     logger.info(f"GET workflow request received for workflow_id: '{workflow_id}'")
     db_pool = get_db_pool()
@@ -87,7 +94,11 @@ async def get_workflow(workflow_id: str):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.put("/{workflow_id}/status")
-async def update_workflow_status(workflow_id: str, request: WorkflowStatusRequest):
+async def update_workflow_status(
+    workflow_id: str,
+    request: WorkflowStatusRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Update workflow status"""
     db_pool = get_db_pool()
     
@@ -113,7 +124,11 @@ async def update_workflow_status(workflow_id: str, request: WorkflowStatusReques
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.post("/{workflow_id}/reasoning-step")
-async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
+async def add_reasoning_step(
+    workflow_id: str,
+    step: ReasoningStep,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Add a reasoning step to workflow"""
     db_pool = get_db_pool()
     
@@ -150,7 +165,9 @@ async def add_reasoning_step(workflow_id: str, step: ReasoningStep):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/pending")
-async def get_pending_workflows():
+async def get_pending_workflows(
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
     """Get workflows that need processing"""
     db_pool = get_db_pool()
     

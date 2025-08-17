@@ -93,15 +93,23 @@ This implementation provides two critical endpoints for AWS Lambda integration w
 
 ## Authentication
 
+**⚠️ MANDATORY AUTHENTICATION - ALL ENDPOINTS REQUIRE AUTHORIZATION**
+
 **Configuration:**
-- Optional Bearer token authentication via `API_KEY` environment variable
-- If `API_KEY` is not set, endpoints operate without authentication
-- When enabled, requires `Authorization: Bearer <token>` header
+- **Required** Bearer token authentication via `API_KEY` environment variable
+- **All API endpoints require** `Authorization: Bearer <token>` header
+- Server will not start without `API_KEY` configured
 
 **Implementation:**
 - FastAPI dependency injection for clean, testable auth
-- Centralized authentication configuration
+- Centralized authentication configuration across all endpoints
+- Consistent security enforcement throughout the application
 - Easy to upgrade to JWT or OAuth later
+
+**Security Headers Required:**
+```
+Authorization: Bearer <your-api-key>
+```
 
 ## Technical Architecture
 
@@ -176,11 +184,13 @@ analysis_response = httpx.post(
 
 ## Environment Configuration
 
-Add to your `.env` file:
+**REQUIRED** - Add to your `.env` file:
 ```bash
-# Optional: API key for Lambda endpoint authentication
+# REQUIRED: API key for all endpoint authentication
 API_KEY=your-secure-api-key-here
 ```
+
+**⚠️ Important:** The server will not start without `API_KEY` configured. This ensures all endpoints are properly secured.
 
 ## Testing
 
@@ -212,16 +222,24 @@ python3 -m py_compile src/api/routes/documents.py
 
 ## Security Considerations
 
+- **Mandatory authentication** on all endpoints including health checks and webhooks
 - Input validation on all request parameters
 - SQL injection prevention via parameterized queries
-- Optional authentication with secure token verification
+- Secure Bearer token verification for all API access
 - Rate limiting considerations for production deployment
+- **Note:** Webhook endpoints now require authentication - ensure external services (like Resend) can provide the API key
 
-## Backwards Compatibility
+## Breaking Changes
 
-- All existing endpoints remain unchanged
-- New endpoints follow established patterns
-- No breaking changes to current API consumers
-- Graceful degradation when API_KEY not configured
+⚠️ **BREAKING CHANGE:** All endpoints now require authentication
+
+- **All existing endpoints now require** `Authorization: Bearer <token>` header
+- New endpoints follow established security patterns
+- **API consumers must be updated** to include authentication headers
+- **API_KEY environment variable is mandatory** - server will not start without it
+- This applies to all endpoints including health checks and webhooks
+
+**Migration Required:**
+All existing API clients must be updated to include the Authorization header before deploying this version.
 
 This implementation provides a robust, scalable foundation for Lambda integration while maintaining the high standards of the existing backend architecture.
