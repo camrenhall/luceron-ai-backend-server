@@ -2,10 +2,10 @@
 Document analysis-related Pydantic models
 """
 
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 from models.enums import DocumentStatus, AnalysisStatus
 
 class DocumentData(BaseModel):
@@ -51,3 +51,121 @@ class AnalysisResultResponse(BaseModel):
     case_id: UUID
     status: str
     analyzed_at: datetime
+
+
+# Lambda Integration Models
+
+class ProcessedFile(BaseModel):
+    """Represents a processed file from the Lambda team"""
+    file_key: str = Field(..., description="S3 key or identifier for the processed file")
+    original_filename_pattern: str = Field(..., description="Pattern to match against original filenames")
+    
+    @validator('file_key')
+    def validate_file_key(cls, v):
+        if not v or not v.strip():
+            raise ValueError('file_key cannot be empty')
+        return v.strip()
+    
+    @validator('original_filename_pattern')
+    def validate_filename_pattern(cls, v):
+        if not v or not v.strip():
+            raise ValueError('original_filename_pattern cannot be empty')
+        return v.strip()
+
+
+class DocumentLookupRequest(BaseModel):
+    """Request model for batch document lookup"""
+    batch_id: str = Field(..., description="Batch identifier to lookup documents for")
+    processed_files: List[ProcessedFile] = Field(..., description="List of processed files to match")
+    
+    @validator('batch_id')
+    def validate_batch_id(cls, v):
+        if not v or not v.strip():
+            raise ValueError('batch_id cannot be empty')
+        return v.strip()
+    
+    @validator('processed_files')
+    def validate_processed_files(cls, v):
+        if not v:
+            raise ValueError('processed_files cannot be empty')
+        if len(v) > 1000:  # Reasonable limit for batch operations
+            raise ValueError('processed_files cannot exceed 1000 items')
+        return v
+
+
+class DocumentMapping(BaseModel):
+    """Represents a mapping between processed file and document"""
+    file_key: str
+    document_id: Optional[str] = None
+    found: bool
+    confidence_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Matching confidence (0-1)")
+
+
+class DocumentLookupResponse(BaseModel):
+    """Response model for batch document lookup"""
+    success: bool
+    batch_id: str
+    total_requested: int
+    total_found: int
+    mappings: List[DocumentMapping]
+
+
+class BulkAnalysisRecord(BaseModel):
+    """Individual analysis record for bulk operations"""
+    document_id: UUID = Field(..., description="Document UUID to associate analysis with")
+    case_id: UUID = Field(..., description="Case UUID for the analysis")
+    workflow_id: Optional[UUID] = Field(None, description="Optional workflow UUID")
+    analysis_content: str = Field(..., description="JSON string containing analysis results")
+    analysis_status: AnalysisStatus = Field(AnalysisStatus.COMPLETED, description="Status of the analysis")
+    model_used: str = Field(..., description="Model identifier used for analysis")
+    tokens_used: Optional[int] = Field(None, ge=0, description="Number of tokens consumed")
+    analyzed_at: datetime = Field(..., description="ISO timestamp when analysis was performed")
+    
+    @validator('analysis_content')
+    def validate_analysis_content(cls, v):
+        if not v or not v.strip():
+            raise ValueError('analysis_content cannot be empty')
+        # Attempt to validate JSON structure
+        try:
+            import json
+            json.loads(v)
+        except json.JSONDecodeError:
+            raise ValueError('analysis_content must be valid JSON')
+        return v.strip()
+    
+    @validator('model_used')
+    def validate_model_used(cls, v):
+        if not v or not v.strip():
+            raise ValueError('model_used cannot be empty')
+        return v.strip()
+
+
+class BulkAnalysisRequest(BaseModel):
+    """Request model for bulk analysis persistence"""
+    analyses: List[BulkAnalysisRecord] = Field(..., description="List of analysis records to persist")
+    
+    @validator('analyses')
+    def validate_analyses(cls, v):
+        if not v:
+            raise ValueError('analyses cannot be empty')
+        if len(v) > 500:  # Reasonable limit for bulk operations
+            raise ValueError('analyses cannot exceed 500 items per request')
+        return v
+
+
+class AnalysisFailure(BaseModel):
+    """Represents a failed analysis record"""
+    index: int
+    record_id: Optional[str] = None
+    error: str
+    error_code: Optional[str] = None
+
+
+class BulkAnalysisResponse(BaseModel):
+    """Response model for bulk analysis persistence"""
+    success: bool
+    total_requested: int
+    inserted_count: int
+    failed_count: int = 0
+    failed_records: Optional[List[AnalysisFailure]] = None
+    processing_time_ms: Optional[int] = None

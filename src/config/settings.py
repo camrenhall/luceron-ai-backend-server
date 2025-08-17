@@ -15,6 +15,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL")
 PORT = int(os.getenv("PORT", 8080))
+API_KEY = os.getenv("API_KEY")
 
 # Validate required environment variables
 if not DATABASE_URL:
