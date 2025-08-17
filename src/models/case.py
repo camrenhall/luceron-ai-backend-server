@@ -37,6 +37,13 @@ class CaseCreateRequest(BaseModel):
     client_phone: Optional[str] = None
     requested_documents: List[RequestedDocument]
 
+class RequestedDocumentUpdateRequest(BaseModel):
+    document_name: Optional[str] = None
+    description: Optional[str] = None
+    is_completed: Optional[bool] = None
+    is_flagged_for_review: Optional[bool] = None
+    notes: Optional[str] = None
+
 class CaseResponse(BaseModel):
     case_id: UUID
     client_email: str

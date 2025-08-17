@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 import asyncpg
 
-from models.case import CaseCreateRequest
+from models.case import CaseCreateRequest, RequestedDocumentUpdateRequest
 from database.connection import get_db_pool
 from utils.auth import AuthConfig
 
@@ -321,4 +321,136 @@ async def get_pending_reminder_cases(
             
     except Exception as e:
         logger.error(f"Failed to get pending cases: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.put("/documents/{requested_doc_id}")
+async def update_requested_document(
+    requested_doc_id: str,
+    request: RequestedDocumentUpdateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """Update a requested document"""
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Check if document exists
+            existing_doc = await conn.fetchrow(
+                "SELECT * FROM requested_documents WHERE requested_doc_id = $1", 
+                requested_doc_id
+            )
+            
+            if not existing_doc:
+                raise HTTPException(status_code=404, detail="Requested document not found")
+            
+            # Build dynamic update query based on provided fields
+            update_fields = []
+            update_values = []
+            param_count = 1
+            
+            if request.document_name is not None:
+                update_fields.append(f"document_name = ${param_count}")
+                update_values.append(request.document_name)
+                param_count += 1
+                
+            if request.description is not None:
+                update_fields.append(f"description = ${param_count}")
+                update_values.append(request.description)
+                param_count += 1
+                
+            if request.is_completed is not None:
+                update_fields.append(f"is_completed = ${param_count}")
+                update_values.append(request.is_completed)
+                param_count += 1
+                
+                # Set completed_at timestamp if marking as completed
+                if request.is_completed:
+                    update_fields.append(f"completed_at = ${param_count}")
+                    update_values.append(datetime.utcnow())
+                    param_count += 1
+                else:
+                    update_fields.append(f"completed_at = ${param_count}")
+                    update_values.append(None)
+                    param_count += 1
+                    
+            if request.is_flagged_for_review is not None:
+                update_fields.append(f"is_flagged_for_review = ${param_count}")
+                update_values.append(request.is_flagged_for_review)
+                param_count += 1
+                
+            if request.notes is not None:
+                update_fields.append(f"notes = ${param_count}")
+                update_values.append(request.notes)
+                param_count += 1
+            
+            if not update_fields:
+                raise HTTPException(status_code=400, detail="No fields provided for update")
+            
+            # Always update the updated_at timestamp
+            update_fields.append(f"updated_at = ${param_count}")
+            update_values.append(datetime.utcnow())
+            update_values.append(requested_doc_id)  # for WHERE clause
+            
+            query = f"""
+                UPDATE requested_documents 
+                SET {', '.join(update_fields)}
+                WHERE requested_doc_id = ${param_count + 1}
+                RETURNING *
+            """
+            
+            updated_doc = await conn.fetchrow(query, *update_values)
+            
+            return {
+                "requested_doc_id": str(updated_doc['requested_doc_id']),
+                "document_name": updated_doc['document_name'],
+                "description": updated_doc['description'],
+                "is_completed": updated_doc['is_completed'],
+                "completed_at": updated_doc['completed_at'].isoformat() if updated_doc['completed_at'] else None,
+                "is_flagged_for_review": updated_doc['is_flagged_for_review'],
+                "notes": updated_doc['notes'],
+                "requested_at": updated_doc['requested_at'].isoformat(),
+                "updated_at": updated_doc['updated_at'].isoformat(),
+                "case_id": str(updated_doc['case_id'])
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update requested document: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.delete("/documents/{requested_doc_id}")
+async def delete_requested_document(
+    requested_doc_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """Delete a requested document"""
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Check if document exists
+            existing_doc = await conn.fetchrow(
+                "SELECT * FROM requested_documents WHERE requested_doc_id = $1", 
+                requested_doc_id
+            )
+            
+            if not existing_doc:
+                raise HTTPException(status_code=404, detail="Requested document not found")
+            
+            # Delete the document
+            await conn.execute(
+                "DELETE FROM requested_documents WHERE requested_doc_id = $1",
+                requested_doc_id
+            )
+            
+            return {
+                "message": "Requested document deleted successfully",
+                "deleted_doc_id": requested_doc_id
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete requested document: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
