@@ -3,22 +3,25 @@ Webhook API routes
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Request
 
 from models.webhook import ResendWebhook
 from utils.helpers import parse_uploaded_timestamp
 from database.connection import get_db_pool
-from utils.auth import AuthConfig
+from utils.webhook_verification import verify_resend_webhook
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.post("/resend")
-async def handle_resend_webhook(
-    webhook: ResendWebhook,
-    _: bool = Depends(AuthConfig.get_auth_dependency())
-):
+async def handle_resend_webhook(request: Request):
     """Handle Resend webhooks (email.opened, email.delivered, email.failed, email.bounced)"""
+    # Verify webhook signature and get parsed payload
+    payload = await verify_resend_webhook(request)
+    
+    # Parse the verified payload into ResendWebhook model
+    webhook = ResendWebhook(**payload)
+    
     db_pool = get_db_pool()
     
     logger.info(f"📧 Resend webhook received: type={webhook.type}, email_id={webhook.data.email_id}")

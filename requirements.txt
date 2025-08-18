@@ -4,3 +4,4 @@ asyncpg
 resend
 pydantic
 httpx
+svix

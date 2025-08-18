@@ -17,6 +17,7 @@ FROM_EMAIL = os.getenv("FROM_EMAIL")
 ALERT_FROM_EMAIL = os.getenv("ALERT_FROM_EMAIL", FROM_EMAIL)  # Defaults to FROM_EMAIL if not set
 PORT = int(os.getenv("PORT", 8080))
 API_KEY = os.getenv("API_KEY")
+RESEND_WEBHOOK_SECRET = os.getenv("RESEND_WEBHOOK_SECRET")
 ADMIN_ALERT_EMAILS = [email.strip() for email in os.getenv("ADMIN_ALERT_EMAILS", "admin@company.com").split(",")]
 
 # Validate required environment variables
