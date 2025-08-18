@@ -3,6 +3,7 @@ Error logging service with email deduplication functionality
 """
 
 import logging
+import json
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 from uuid import UUID
@@ -44,13 +45,16 @@ class ErrorLogService:
                 )
                 
                 # Insert the error log
+                # Serialize context to JSON if it's a dictionary
+                context_json = json.dumps(context) if context is not None else None
+                
                 error_id = await conn.fetchval("""
                     INSERT INTO error_logs (
                         component, error_message, severity, context, email_sent, created_at, updated_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                     RETURNING error_id
                 """, 
-                component, error_message, severity, context, 
+                component, error_message, severity, context_json, 
                 should_send_email, datetime.utcnow(), datetime.utcnow())
                 
                 logger.info(
@@ -132,7 +136,18 @@ class ErrorLogService:
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(query, *params)
             
-            return [dict(row) for row in rows]
+            # Deserialize context JSON back to dictionaries
+            result = []
+            for row in rows:
+                row_dict = dict(row)
+                if row_dict['context']:
+                    try:
+                        row_dict['context'] = json.loads(row_dict['context'])
+                    except (json.JSONDecodeError, TypeError):
+                        row_dict['context'] = None
+                result.append(row_dict)
+            
+            return result
 
     @staticmethod
     async def get_error_by_id(error_id: UUID) -> Optional[Dict[str, Any]]:
@@ -155,7 +170,16 @@ class ErrorLogService:
                 WHERE error_id = $1
             """, error_id)
             
-            return dict(row) if row else None
+            if row:
+                row_dict = dict(row)
+                if row_dict['context']:
+                    try:
+                        row_dict['context'] = json.loads(row_dict['context'])
+                    except (json.JSONDecodeError, TypeError):
+                        row_dict['context'] = None
+                return row_dict
+            
+            return None
 
     @staticmethod
     async def get_component_stats(component: str, hours: int = 24) -> Dict[str, Any]:
