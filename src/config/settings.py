@@ -16,6 +16,7 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL")
 PORT = int(os.getenv("PORT", 8080))
 API_KEY = os.getenv("API_KEY")
+ADMIN_ALERT_EMAILS = [email.strip() for email in os.getenv("ADMIN_ALERT_EMAILS", "admin@company.com").split(",")]
 
 # Validate required environment variables
 if not DATABASE_URL:

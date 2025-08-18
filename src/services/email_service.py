@@ -73,3 +73,18 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
         
         logger.error(f"Email sending failed: {e}")
         raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")
+
+async def send_direct_alert(recipient: str, subject: str, html_body: str):
+    """Send alert email directly - bypasses database logging"""
+    try:
+        email_data = {
+            "from": FROM_EMAIL,
+            "to": [recipient],
+            "subject": subject,
+            "html": html_body
+        }
+        result = resend.Emails.send(email_data)
+        logger.info(f"Alert sent to {recipient}")
+    except Exception as e:
+        logger.error(f"Failed to send alert to {recipient}: {e}")
+        raise
