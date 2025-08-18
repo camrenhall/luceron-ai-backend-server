@@ -25,14 +25,14 @@ async def authenticate_api(authorization: Optional[str] = Header(None)):
         HTTPException: 401 if authentication fails
     """
     if not authorization:
-        logger.warning("API request missing Authorization header")
+        logger.error("API request missing Authorization header")
         raise HTTPException(
             status_code=401, 
             detail="Missing Authorization header"
         )
     
     if not authorization.startswith("Bearer "):
-        logger.warning("API request with invalid Authorization header format")
+        logger.error("API request with invalid Authorization header format")
         raise HTTPException(
             status_code=401, 
             detail="Invalid authorization header format. Expected 'Bearer <token>'"
@@ -48,7 +48,7 @@ async def authenticate_api(authorization: Optional[str] = Header(None)):
         )
     
     if token != API_KEY:
-        logger.warning(f"API request with invalid token: {token[:8]}...")
+        logger.error(f"API request with invalid token: {token[:8]}...")
         raise HTTPException(
             status_code=401, 
             detail="Invalid API key"

@@ -47,7 +47,7 @@ async def verify_resend_webhook(request: Request) -> Dict[str, Any]:
         # Check that all required headers are present
         missing_headers = [key for key, value in headers.items() if not value]
         if missing_headers:
-            logger.warning(f"Missing required webhook headers: {missing_headers}")
+            logger.error(f"Missing required webhook headers: {missing_headers}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Missing required webhook headers: {missing_headers}"
@@ -61,7 +61,7 @@ async def verify_resend_webhook(request: Request) -> Dict[str, Any]:
         return verified_payload
         
     except Exception as e:
-        logger.warning(f"Webhook verification failed: {str(e)}")
+        logger.error(f"Webhook verification failed: {str(e)}")
         raise HTTPException(
             status_code=400,
             detail=f"Webhook verification failed: {str(e)}"
