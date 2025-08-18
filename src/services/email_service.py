@@ -7,7 +7,7 @@ from datetime import datetime
 import resend
 from fastapi import HTTPException
 
-from config.settings import FROM_EMAIL
+from config.settings import FROM_EMAIL, ALERT_FROM_EMAIL
 from models.email import EmailRequest, EmailResponse
 from database.connection import get_db_pool
 
@@ -78,7 +78,7 @@ async def send_direct_alert(recipient: str, subject: str, html_body: str):
     """Send alert email directly - bypasses database logging"""
     try:
         email_data = {
-            "from": FROM_EMAIL,
+            "from": ALERT_FROM_EMAIL,
             "to": [recipient],
             "subject": subject,
             "html": html_body
