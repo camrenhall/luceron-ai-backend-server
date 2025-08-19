@@ -31,7 +31,7 @@ class WorkflowCreateRequest(BaseModel):
     status: Status = Status.PENDING
     initial_prompt: str
 
-class StatusRequest(BaseModel):
+class WorkflowStatusRequest(BaseModel):
     status: Status
 
 class WorkflowUpdateRequest(BaseModel):
