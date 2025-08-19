@@ -6,8 +6,9 @@ The **luceron-ai-backend-server** is the central data and integration layer of t
 
 ### Primary Purpose and Responsibilities
 
-- **Data Persistence Layer**: Manages all CRUD operations for cases, documents, and communications
-- **Integration Hub**: Orchestrates email/SMS communications via Resend API
+- **Data Persistence Layer**: Manages all CRUD operations for cases, documents, communications, and agent state
+- **Integration Hub**: Orchestrates email/SMS communications via Resend API  
+- **Agent State Management**: Persists conversation history, context, and summaries for AI agents
 - **Document Pipeline Support**: Provides APIs for AWS Lambda functions during document processing
 - **Audit Trail**: Maintains comprehensive logs of all system activities and communications
 
@@ -29,8 +30,10 @@ graph TB
 
 1. **Data Consistency**: Ensures all microservices work with consistent, validated data
 2. **Communication Tracking**: Maintains complete audit trail of client interactions
-3. **Scalable Document Processing**: Supports high-volume batch document operations
-4. **Error Recovery**: Provides resilient error handling with admin alerting
+3. **Agent Conversation Management**: Enables stateful AI agent conversations with context persistence
+4. **Scalable Document Processing**: Supports high-volume batch document operations
+5. **Token Usage Tracking**: Monitors and controls LLM API costs across all agent interactions
+6. **Error Recovery**: Provides resilient error handling with admin alerting
 
 ## Technical Architecture
 
@@ -185,6 +188,172 @@ X-API-Key: {API_KEY}
 - `GET /api/documents/analysis/case/{case_id}/aggregate`
 - Dynamic SQL aggregation of analysis data
 
+#### Agent State Management API
+
+The agent state management system provides conversation persistence, message tracking, context storage, and summary generation for AI agents. This system replaces the previous workflow_states table with a more sophisticated architecture.
+
+##### Agent Conversations
+
+**Create Conversation**
+- `POST /api/agent/conversations`
+- Creates a new conversation session for an agent
+- Request Schema:
+```json
+{
+  "case_id": "uuid",
+  "agent_type": "CommunicationsAgent|AnalysisAgent",
+  "status": "ACTIVE|COMPLETED|FAILED|ARCHIVED"
+}
+```
+
+**Get Conversation**
+- `GET /api/agent/conversations/{conversation_id}`
+- Returns conversation metadata including token usage
+
+**Update Conversation**
+- `PUT /api/agent/conversations/{conversation_id}`
+- Updates conversation status
+
+**Delete Conversation**
+- `DELETE /api/agent/conversations/{conversation_id}`
+- Deletes conversation and all associated messages/summaries
+
+**List Conversations**
+- `GET /api/agent/conversations`
+- Query params: `case_id`, `agent_type`, `status`, `limit`, `offset`
+
+**Get Full Conversation**
+- `GET /api/agent/conversations/{conversation_id}/full`
+- Returns conversation with all messages and summaries
+- Query params: `include_summaries`, `include_function_calls`
+
+##### Agent Messages
+
+**Create Message**
+- `POST /api/agent/messages`
+- Adds a new message to a conversation
+- Request Schema:
+```json
+{
+  "conversation_id": "uuid",
+  "role": "system|user|assistant|function",
+  "content": {"text": "message content", "metadata": {}},
+  "total_tokens": 150,
+  "model_used": "gpt-4-turbo",
+  "function_name": "optional_function_name",
+  "function_arguments": {"param": "value"},
+  "function_response": {"result": "data"}
+}
+```
+
+**Get Message**
+- `GET /api/agent/messages/{message_id}`
+- Returns individual message with metadata
+
+**Update Message**
+- `PUT /api/agent/messages/{message_id}`
+- Updates message content, tokens, or function response
+
+**Delete Message**
+- `DELETE /api/agent/messages/{message_id}`
+- Removes message from conversation
+
+**List Messages**
+- `GET /api/agent/messages`
+- Query params: `conversation_id`, `role`, `limit`, `offset`
+
+**Get Conversation History**
+- `GET /api/agent/messages/conversation/{conversation_id}/history`
+- Returns messages in chronological order
+- Query params: `limit`, `include_function_calls`
+
+##### Agent Summaries
+
+**Create Summary**
+- `POST /api/agent/summaries`
+- Creates a conversation summary
+- Request Schema:
+```json
+{
+  "conversation_id": "uuid",
+  "last_message_id": "uuid",
+  "summary_content": "Summary of the conversation...",
+  "messages_summarized": 10
+}
+```
+
+**Get Summary**
+- `GET /api/agent/summaries/{summary_id}`
+- Returns summary details
+
+**Update Summary**
+- `PUT /api/agent/summaries/{summary_id}`
+- Updates summary content or message count
+
+**Delete Summary**
+- `DELETE /api/agent/summaries/{summary_id}`
+- Removes summary
+
+**List Summaries**
+- `GET /api/agent/summaries`
+- Query params: `conversation_id`, `limit`, `offset`
+
+**Get Latest Summary**
+- `GET /api/agent/summaries/conversation/{conversation_id}/latest`
+- Returns most recent summary for a conversation
+
+**Auto-Generate Summary**
+- `POST /api/agent/summaries/conversation/{conversation_id}/auto-summary`
+- Creates summary from recent messages
+- Query params: `messages_to_summarize`
+
+##### Agent Context
+
+**Create/Update Context**
+- `POST /api/agent/context`
+- Upserts context key-value pairs
+- Request Schema:
+```json
+{
+  "case_id": "uuid",
+  "agent_type": "CommunicationsAgent|AnalysisAgent",
+  "context_key": "document_findings",
+  "context_value": {"key": "value", "data": []},
+  "expires_at": "2024-12-31T23:59:59Z"
+}
+```
+
+**Get Context**
+- `GET /api/agent/context/{context_id}`
+- Returns context entry (excludes expired)
+
+**Update Context**
+- `PUT /api/agent/context/{context_id}`
+- Updates context value or expiration
+
+**Delete Context**
+- `DELETE /api/agent/context/{context_id}`
+- Removes context entry
+
+**List Context**
+- `GET /api/agent/context`
+- Query params: `case_id`, `agent_type`, `context_key`, `include_expired`, `limit`, `offset`
+
+**Get Case Agent Context**
+- `GET /api/agent/context/case/{case_id}/agent/{agent_type}`
+- Returns all context as key-value map for specific case/agent
+
+**Get Specific Context Value**
+- `GET /api/agent/context/case/{case_id}/agent/{agent_type}/key/{context_key}`
+- Returns single context value
+
+**Delete Case Agent Context**
+- `DELETE /api/agent/context/case/{case_id}/agent/{agent_type}`
+- Removes all context for case/agent combination
+
+**Cleanup Expired Context**
+- `POST /api/agent/context/cleanup-expired`
+- Removes all expired context entries
 
 #### Email API
 
@@ -411,6 +580,27 @@ Currently no feature flags implemented. Consider adding:
    - Communication audit trail
    - Columns: `communication_id`, `case_id`, `channel`, `direction`, `status`, `opened_at`, `sender`, `recipient`, `subject`, `message_content`, `resend_id`
 
+6. **Agent State Management Tables**
+   
+   **agent_conversations**
+   - Conversation session management
+   - Columns: `conversation_id`, `case_id`, `agent_type`, `status`, `total_tokens_used`, `created_at`, `updated_at`
+   - Agent types: `CommunicationsAgent`, `AnalysisAgent`
+   - Status: `ACTIVE`, `COMPLETED`, `FAILED`, `ARCHIVED`
+   
+   **agent_messages**
+   - Individual message storage with sequencing
+   - Columns: `message_id`, `conversation_id`, `role`, `content` (JSONB), `total_tokens`, `model_used`, `function_name`, `function_arguments` (JSONB), `function_response` (JSONB), `created_at`, `sequence_number`
+   - Message roles: `system`, `user`, `assistant`, `function`
+   
+   **agent_summaries**
+   - Rolling conversation summaries
+   - Columns: `summary_id`, `conversation_id`, `last_message_id`, `summary_content`, `messages_summarized`, `created_at`, `updated_at`
+   
+   **agent_context**
+   - Persistent key-value context storage
+   - Columns: `context_id`, `case_id`, `agent_type`, `context_key`, `context_value` (JSONB), `expires_at`, `created_at`, `updated_at`
+   - Unique constraint: `(case_id, agent_type, context_key)`
 
 7. **error_logs**
    - System error tracking

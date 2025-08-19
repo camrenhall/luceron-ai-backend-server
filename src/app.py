@@ -1,6 +1,6 @@
 """
 Production Backend API Server
-Core functionality: Cases, Documents, Email via Resend
+Core functionality: Cases, Documents, Agent State Management, Email via Resend
 """
 
 import logging
@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import PORT, ALLOWED_ORIGINS
 from database.connection import init_database, close_database
-from api.routes import health, documents, cases, emails, webhooks, alerts
+from api.routes import health, documents, cases, emails, webhooks, alerts, agent_conversations, agent_messages, agent_summaries, agent_context
 from utils.error_handling import setup_error_handling
 
 # Configure logging
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
 # FastAPI app initialization
 app = FastAPI(
     title="Legal Communications Backend",
-    description="Backend API for case management and email communications", 
+    description="Backend API for case management, agent state management, and email communications", 
     version="1.0.0",
     lifespan=lifespan
 )
@@ -52,6 +52,10 @@ app.include_router(cases.router, prefix="/api/cases", tags=["Cases"])
 app.include_router(emails.router, prefix="/api", tags=["Emails"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(alerts.router, prefix="/api", tags=["Alerts"])
+app.include_router(agent_conversations.router, prefix="/api/agent/conversations", tags=["Agent Conversations"])
+app.include_router(agent_messages.router, prefix="/api/agent/messages", tags=["Agent Messages"])
+app.include_router(agent_summaries.router, prefix="/api/agent/summaries", tags=["Agent Summaries"])
+app.include_router(agent_context.router, prefix="/api/agent/context", tags=["Agent Context"])
 
 # FastAPI app instance is exported for use by uvicorn
 # Server startup is handled by main.py at the project root
