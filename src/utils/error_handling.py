@@ -13,6 +13,7 @@ from contextvars import ContextVar
 
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 # Context variables for request tracing
@@ -231,6 +232,59 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         content=response_content
     )
 
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Handle FastAPI validation errors (HTTP 422)"""
+    
+    body_str = None
+    if hasattr(request.state, 'captured_body') and request.state.captured_body:
+        try:
+            body_str = request.state.captured_body.decode('utf-8')
+        except Exception:
+            body_str = "DECODE_ERROR"
+    
+    # Extract detailed validation error information
+    validation_details = []
+    for error in exc.errors():
+        validation_details.append({
+            "field": " -> ".join(str(loc) for loc in error.get("loc", [])),
+            "message": error.get("msg", "Unknown validation error"),
+            "type": error.get("type", "unknown"),
+            "input": error.get("input", "not_provided")
+        })
+    
+    trace_id = StructuredLogger.log_error(
+        "validation_error_422",
+        f"Request validation failed: {len(exc.errors())} validation errors",
+        request=request,
+        exception=exc,
+        extra_context={
+            "validation_errors": validation_details,
+            "error_count": len(exc.errors()),
+            "request_body": ErrorHandlingConfig.sanitize_data(body_str) if body_str else None,
+            "raw_errors": exc.errors()
+        },
+        include_traceback=False
+    )
+    
+    # Build detailed response for debugging
+    response_content = {
+        "error": "Validation Error",
+        "message": "Request validation failed",
+        "detail": validation_details,
+        "error_count": len(exc.errors())
+    }
+    
+    if ErrorHandlingConfig.INCLUDE_TRACE_ID:
+        response_content["trace_id"] = trace_id
+    
+    if ErrorHandlingConfig.INCLUDE_TIMESTAMP:
+        response_content["timestamp"] = datetime.utcnow().isoformat()
+    
+    return JSONResponse(
+        status_code=422,
+        content=response_content
+    )
+
 async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle all other exceptions"""
     
@@ -275,11 +329,12 @@ def setup_error_handling(app):
     # Add middleware for request context
     app.add_middleware(RequestContextMiddleware)
     
-    # Add exception handlers
+    # Add exception handlers (order matters - most specific first)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
     
-    logger.info("Centralized error handling system initialized")
+    logger.info("Centralized error handling system initialized with validation error handling")
 
 # Utility for endpoint-specific logging
 def set_endpoint_context(context: str):
