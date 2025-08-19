@@ -34,6 +34,15 @@ class Status(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
+# Case status enum for database ENUM type
+class CaseStatus(str, Enum):
+    """
+    Case status enum matching the database ENUM type.
+    Only two values are allowed: OPEN and CLOSED.
+    """
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
 # Backward compatibility aliases - use Status instead
 WorkflowStatus = Status
 DocumentStatus = Status
