@@ -19,27 +19,22 @@ class DeliveryStatus(str, Enum):
     FAILED = "failed"
     OPENED = "opened"
 
-# Workflow-related enums
-class WorkflowStatus(str, Enum):
+# Unified Status enum for all processing entities (workflows, documents, analysis)
+class Status(str, Enum):
+    """
+    Unified status enum for all processing entities in the system.
+    
+    - PENDING: Initial state, entity created but not yet being processed
+    - PROCESSING: Entity is currently being worked on
+    - COMPLETED: Processing finished successfully
+    - FAILED: Processing encountered an error and stopped
+    """
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
-    AWAITING_SCHEDULE = "AWAITING_SCHEDULE"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
-    PENDING_PLANNING = "PENDING_PLANNING"
-    AWAITING_BATCH_COMPLETION = "AWAITING_BATCH_COMPLETION"
-    SYNTHESIZING_RESULTS = "SYNTHESIZING_RESULTS"
-    NEEDS_HUMAN_REVIEW = "NEEDS_HUMAN_REVIEW"
 
-# Document-related enums
-class DocumentStatus(str, Enum):
-    UPLOADED = "uploaded"
-    CONVERTED = "converted"
-    ANALYZING = "analyzing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-class AnalysisStatus(str, Enum):
-    COMPLETED = "completed"
-    FAILED = "failed"
-    NEEDS_REVIEW = "needs_review"
+# Backward compatibility aliases - use Status instead
+WorkflowStatus = Status
+DocumentStatus = Status
+AnalysisStatus = Status

@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel, Field, validator
-from models.enums import DocumentStatus, AnalysisStatus
+from models.enums import Status
 
 class DocumentData(BaseModel):
     document_id: UUID
@@ -16,7 +16,7 @@ class DocumentData(BaseModel):
     original_file_type: str
     original_s3_location: str
     original_s3_key: str
-    status: DocumentStatus = DocumentStatus.UPLOADED
+    status: Status = Status.PENDING
     created_at: datetime
     processed_file_name: Optional[str] = None
     processed_file_size: Optional[int] = None
@@ -29,7 +29,7 @@ class DocumentAnalysisData(BaseModel):
     document_id: UUID
     case_id: UUID
     analysis_content: str
-    analysis_status: AnalysisStatus = AnalysisStatus.COMPLETED
+    analysis_status: Status = Status.COMPLETED
     model_used: str
     tokens_used: Optional[int] = None
     analyzed_at: datetime
@@ -42,7 +42,7 @@ class AnalysisResultRequest(BaseModel):
     analysis_content: str
     model_used: str = "o3"
     tokens_used: Optional[int] = None
-    analysis_status: AnalysisStatus = AnalysisStatus.COMPLETED
+    analysis_status: Status = Status.COMPLETED
     analysis_reasoning: Optional[str] = None
 
 class AnalysisResultResponse(BaseModel):
@@ -115,7 +115,7 @@ class BulkAnalysisRecord(BaseModel):
     document_id: UUID = Field(..., description="Document UUID to associate analysis with")
     case_id: UUID = Field(..., description="Case UUID for the analysis")
     analysis_content: str = Field(..., description="JSON string containing analysis results")
-    analysis_status: AnalysisStatus = Field(AnalysisStatus.COMPLETED, description="Status of the analysis")
+    analysis_status: Status = Field(Status.COMPLETED, description="Status of the analysis")
     model_used: str = Field(..., description="Model identifier used for analysis")
     tokens_used: Optional[int] = Field(None, ge=0, description="Number of tokens consumed")
     analyzed_at: datetime = Field(..., description="ISO timestamp when analysis was performed")
@@ -188,7 +188,7 @@ class DocumentCreateRequest(BaseModel):
     original_s3_location: str = Field(..., description="S3 bucket/region location")
     original_s3_key: str = Field(..., max_length=1000, description="S3 object key")
     batch_id: Optional[str] = Field(None, max_length=255, description="Optional batch identifier")
-    status: DocumentStatus = Field(DocumentStatus.UPLOADED, description="Initial document status")
+    status: Status = Field(Status.PENDING, description="Initial document status")
     
     @validator('original_file_name')
     def validate_filename(cls, v):
@@ -221,7 +221,7 @@ class DocumentUpdateRequest(BaseModel):
     processed_file_size: Optional[int] = Field(None, gt=0, description="Processed file size in bytes")
     processed_s3_location: Optional[str] = Field(None, description="Processed file S3 location")
     processed_s3_key: Optional[str] = Field(None, max_length=1000, description="Processed file S3 key")
-    status: Optional[DocumentStatus] = Field(None, description="Updated document status")
+    status: Optional[Status] = Field(None, description="Updated document status")
     
     @validator('processed_file_name')
     def validate_processed_filename(cls, v):
@@ -252,7 +252,7 @@ class DocumentCreateResponse(BaseModel):
     document_id: UUID
     case_id: UUID
     original_file_name: str
-    status: DocumentStatus
+    status: Status
     created_at: datetime
     message: str = "Document record created successfully"
 
@@ -262,7 +262,7 @@ class DocumentUpdateResponse(BaseModel):
     success: bool
     document_id: UUID
     updated_fields: List[str]
-    status: DocumentStatus
+    status: Status
     updated_at: datetime
     message: str = "Document record updated successfully"
 
@@ -272,7 +272,7 @@ class DocumentUpdateResponse(BaseModel):
 class DocumentAnalysisUpdateRequest(BaseModel):
     """Request model for updating document analysis"""
     analysis_content: Optional[str] = Field(None, description="Updated analysis content JSON")
-    analysis_status: Optional[AnalysisStatus] = Field(None, description="Updated analysis status")
+    analysis_status: Optional[Status] = Field(None, description="Updated analysis status")
     model_used: Optional[str] = Field(None, description="Updated model identifier")
     tokens_used: Optional[int] = Field(None, ge=0, description="Updated token count")
     analysis_reasoning: Optional[str] = Field(None, description="Updated reasoning behind the analysis process")

@@ -501,7 +501,7 @@ async def bulk_store_document_analysis(
                         # Update document status to completed
                         await conn.execute("""
                             UPDATE documents 
-                            SET status = 'completed' 
+                            SET status = 'COMPLETED' 
                             WHERE document_id = $1
                         """, analysis.document_id)
                         
@@ -591,7 +591,7 @@ async def store_document_analysis(
             
             # Update document status to completed
             await conn.execute(
-                "UPDATE documents SET status = 'completed' WHERE document_id = $1",
+                "UPDATE documents SET status = 'COMPLETED' WHERE document_id = $1",
                 document_id
             )
             
@@ -832,7 +832,7 @@ async def get_aggregated_analysis_summary(
                 contents = await conn.fetch("""
                     SELECT analysis_content
                     FROM document_analysis
-                    WHERE case_id = $1 AND analysis_status = 'completed'
+                    WHERE case_id = $1 AND analysis_status = 'COMPLETED'
                 """, case_id)
                 
                 # Here you could implement custom logic to merge/aggregate the JSON contents
@@ -970,10 +970,10 @@ async def delete_document_analysis(
                     doc_id
                 )
                 
-                # If no other analyses exist, update document status
+                # If no other analyses exist, update document status back to processing
                 if other_analyses == 0:
                     await conn.execute(
-                        "UPDATE documents SET status = 'converted' WHERE document_id = $1",
+                        "UPDATE documents SET status = 'PROCESSING' WHERE document_id = $1",
                         doc_id
                     )
                 

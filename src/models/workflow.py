@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel
-from models.enums import WorkflowStatus
+from models.enums import Status
 
 class ReasoningStep(BaseModel):
     timestamp: str
@@ -19,7 +19,7 @@ class WorkflowStateData(BaseModel):
     workflow_id: UUID
     case_id: Optional[UUID] = None
     agent_type: str = "CommunicationsAgent"
-    status: WorkflowStatus = WorkflowStatus.PENDING
+    status: Status = Status.PENDING
     initial_prompt: str
     reasoning_chain: List[Dict[str, Any]] = []
     final_response: Optional[str] = None
@@ -28,13 +28,13 @@ class WorkflowStateData(BaseModel):
 class WorkflowCreateRequest(BaseModel):
     agent_type: str = "CommunicationsAgent"
     case_id: Optional[UUID] = None
-    status: WorkflowStatus = WorkflowStatus.PENDING
+    status: Status = Status.PENDING
     initial_prompt: str
 
-class WorkflowStatusRequest(BaseModel):
-    status: WorkflowStatus
+class StatusRequest(BaseModel):
+    status: Status
 
 class WorkflowUpdateRequest(BaseModel):
-    status: Optional[WorkflowStatus] = None
+    status: Optional[Status] = None
     reasoning_chain: Optional[List[Dict[str, Any]]] = None
     final_response: Optional[str] = None
