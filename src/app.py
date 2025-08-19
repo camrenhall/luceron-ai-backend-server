@@ -1,6 +1,6 @@
 """
 Production Backend API Server
-Core functionality: Cases, Workflows, Email via Resend
+Core functionality: Cases, Documents, Email via Resend
 """
 
 import logging
@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import PORT, ALLOWED_ORIGINS
 from database.connection import init_database, close_database
-from api.routes import health, documents, cases, emails, workflows, webhooks, alerts
+from api.routes import health, documents, cases, emails, webhooks, alerts
 from utils.error_handling import setup_error_handling
 
 # Configure logging
@@ -50,7 +50,6 @@ app.include_router(health.router, tags=["Health"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(cases.router, prefix="/api/cases", tags=["Cases"])
 app.include_router(emails.router, prefix="/api", tags=["Emails"])
-app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(alerts.router, prefix="/api", tags=["Alerts"])
 

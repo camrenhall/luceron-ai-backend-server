@@ -6,9 +6,8 @@ The **luceron-ai-backend-server** is the central data and integration layer of t
 
 ### Primary Purpose and Responsibilities
 
-- **Data Persistence Layer**: Manages all CRUD operations for cases, documents, workflows, and communications
+- **Data Persistence Layer**: Manages all CRUD operations for cases, documents, and communications
 - **Integration Hub**: Orchestrates email/SMS communications via Resend API
-- **Workflow State Management**: Persists and tracks long-running agent conversation states
 - **Document Pipeline Support**: Provides APIs for AWS Lambda functions during document processing
 - **Audit Trail**: Maintains comprehensive logs of all system activities and communications
 
@@ -32,7 +31,6 @@ graph TB
 2. **Communication Tracking**: Maintains complete audit trail of client interactions
 3. **Scalable Document Processing**: Supports high-volume batch document operations
 4. **Error Recovery**: Provides resilient error handling with admin alerting
-5. **Workflow Persistence**: Enables stateful agent conversations across system restarts
 
 ## Technical Architecture
 
@@ -187,32 +185,6 @@ X-API-Key: {API_KEY}
 - `GET /api/documents/analysis/case/{case_id}/aggregate`
 - Dynamic SQL aggregation of analysis data
 
-#### Workflows API
-
-##### Create Workflow
-- `POST /api/workflows`
-- Creates workflow state for agent conversations
-- Request Schema:
-```json
-{
-  "agent_type": "string",
-  "case_id": "uuid",
-  "status": "PENDING|PROCESSING|COMPLETED|FAILED",
-  "initial_prompt": "string"
-}
-```
-
-##### Get Workflow
-- `GET /api/workflows/{workflow_id}`
-- Returns workflow with reasoning chain
-
-##### Update Workflow
-- `PUT /api/workflows/{workflow_id}`
-- Updates workflow status/reasoning/response
-
-##### Add Reasoning Step
-- `POST /api/workflows/{workflow_id}/reasoning-step`
-- Appends reasoning step to chain
 
 #### Email API
 
@@ -439,9 +411,6 @@ Currently no feature flags implemented. Consider adding:
    - Communication audit trail
    - Columns: `communication_id`, `case_id`, `channel`, `direction`, `status`, `opened_at`, `sender`, `recipient`, `subject`, `message_content`, `resend_id`
 
-6. **workflow_states**
-   - Agent conversation persistence
-   - Columns: `workflow_id`, `agent_type`, `case_id`, `status`, `initial_prompt`, `reasoning_chain` (JSON), `final_response`
 
 7. **error_logs**
    - System error tracking
@@ -537,26 +506,12 @@ resend.api_key = RESEND_API_KEY
 #### Database State Changes
 The following state changes trigger downstream processing:
 
-1. **Case Created**: Enables workflow association
+1. **Case Created**: Creates new case record
 2. **Document Status Updated**: Triggers agent notifications
 3. **Analysis Stored**: Enables aggregation queries
-4. **Workflow Updated**: Signals agent processing complete
 
 ### Message Formats
 
-#### Workflow Reasoning Chain
-```json
-{
-  "reasoning_chain": [
-    {
-      "thought": "string",
-      "action": "string",
-      "observation": "string",
-      "timestamp": "ISO-8601"
-    }
-  ]
-}
-```
 
 #### Document Analysis Content
 ```json
@@ -590,7 +545,6 @@ tests/
 ├── integration/
 │   ├── test_api_cases.py
 │   ├── test_api_documents.py
-│   └── test_api_workflows.py
 └── conftest.py
 ```
 
@@ -847,12 +801,6 @@ Alert configuration:
 2. Check webhook URL configuration in Resend
 3. Ensure raw body is used for verification
 
-#### UUID Format Errors
-**Symptom**: "Invalid workflow_id format"
-**Solution**:
-1. Ensure UUIDs are lowercase
-2. Verify UUID format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
-3. Check for extra whitespace
 
 ### Debug Procedures
 

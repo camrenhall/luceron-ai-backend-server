@@ -51,15 +51,6 @@ async def create_case(
                         "description": doc.description
                     })
                 
-                # Update any existing workflows that were created without a case_id
-                # and should be associated with this new case (e.g., communication workflows)
-                await conn.execute("""
-                    UPDATE workflow_states 
-                    SET case_id = $1 
-                    WHERE case_id IS NULL 
-                    AND agent_type = 'CommunicationsAgent'
-                    AND created_at >= NOW() - INTERVAL '1 hour'
-                """, case_id)
             
             return {
                 "case_id": str(case_id),
