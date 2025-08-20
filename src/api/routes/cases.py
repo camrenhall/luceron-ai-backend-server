@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Query
 import asyncpg
 
-from models.case import CaseCreateRequest, RequestedDocumentUpdateRequest, CaseSearchQuery, CaseSearchResponse, DateOperator
+from models.case import CaseCreateRequest, CaseUpdateRequest, RequestedDocumentCreateRequest, RequestedDocumentUpdateRequest, CaseSearchQuery, CaseSearchResponse, DateOperator
 from models.enums import CaseStatus
 from database.connection import get_db_pool
 from utils.auth import AuthConfig
@@ -127,6 +127,138 @@ async def get_case(
             
     except Exception as e:
         logger.error(f"Failed to get case: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.put("/{case_id}")
+async def update_case(
+    case_id: str,
+    request: CaseUpdateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """Update case details"""
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Check if case exists
+            existing_case = await conn.fetchrow(
+                "SELECT * FROM cases WHERE case_id = $1", case_id
+            )
+            
+            if not existing_case:
+                raise HTTPException(status_code=404, detail="Case not found")
+            
+            # Build dynamic update query based on provided fields
+            update_fields = []
+            update_values = []
+            param_count = 1
+            
+            if request.client_name is not None:
+                update_fields.append(f"client_name = ${param_count}")
+                update_values.append(request.client_name)
+                param_count += 1
+                
+            if request.client_email is not None:
+                update_fields.append(f"client_email = ${param_count}")
+                update_values.append(request.client_email)
+                param_count += 1
+                
+            if request.client_phone is not None:
+                update_fields.append(f"client_phone = ${param_count}")
+                update_values.append(request.client_phone)
+                param_count += 1
+                
+            if request.status is not None:
+                update_fields.append(f"status = ${param_count}")
+                update_values.append(request.status.value)
+                param_count += 1
+            
+            if not update_fields:
+                raise HTTPException(status_code=400, detail="No fields provided for update")
+            
+            # Always update the updated_at timestamp (assuming it exists or we add it)
+            update_fields.append(f"updated_at = ${param_count}")
+            update_values.append(datetime.utcnow())
+            update_values.append(case_id)  # for WHERE clause
+            
+            query = f"""
+                UPDATE cases 
+                SET {', '.join(update_fields)}
+                WHERE case_id = ${param_count + 1}
+                RETURNING *
+            """
+            
+            updated_case = await conn.fetchrow(query, *update_values)
+            
+            return {
+                "case_id": str(updated_case['case_id']),
+                "client_name": updated_case['client_name'],
+                "client_email": updated_case['client_email'],
+                "client_phone": updated_case['client_phone'],
+                "status": updated_case['status'],
+                "created_at": updated_case['created_at'].isoformat()
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update case: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.delete("/{case_id}")
+async def delete_case(
+    case_id: str,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """Delete a case and all associated data"""
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                # Check if case exists
+                existing_case = await conn.fetchrow(
+                    "SELECT * FROM cases WHERE case_id = $1", case_id
+                )
+                
+                if not existing_case:
+                    raise HTTPException(status_code=404, detail="Case not found")
+                
+                # Delete associated requested documents first (due to foreign key constraints)
+                await conn.execute(
+                    "DELETE FROM requested_documents WHERE case_id = $1", case_id
+                )
+                
+                # Delete associated communications
+                await conn.execute(
+                    "DELETE FROM client_communications WHERE case_id = $1", case_id
+                )
+                
+                # Delete any documents associated with the case
+                await conn.execute(
+                    "DELETE FROM documents WHERE case_id = $1", case_id
+                )
+                
+                # Delete any document analysis associated with the case
+                await conn.execute(
+                    "DELETE FROM document_analysis WHERE case_id = $1", case_id
+                )
+                
+                # Finally delete the case
+                await conn.execute(
+                    "DELETE FROM cases WHERE case_id = $1", case_id
+                )
+                
+                return {
+                    "message": "Case and all associated data deleted successfully",
+                    "deleted_case_id": case_id,
+                    "client_name": existing_case['client_name']
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete case: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.get("/{case_id}/communications")
@@ -550,6 +682,57 @@ async def get_pending_reminder_cases(
             
     except Exception as e:
         logger.error(f"Failed to get pending cases: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.post("/documents")
+async def create_requested_document(
+    request: RequestedDocumentCreateRequest,
+    _: bool = Depends(AuthConfig.get_auth_dependency())
+):
+    """Create a new requested document for an existing case"""
+    db_pool = get_db_pool()
+    
+    try:
+        async with db_pool.acquire() as conn:
+            # Check if case exists
+            case_exists = await conn.fetchrow(
+                "SELECT case_id FROM cases WHERE case_id = $1", request.case_id
+            )
+            
+            if not case_exists:
+                raise HTTPException(status_code=404, detail="Case not found")
+            
+            # Create the requested document
+            doc_id = await conn.fetchval("""
+                INSERT INTO requested_documents (case_id, document_name, description, requested_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING requested_doc_id
+            """,
+            request.case_id, request.document_name, request.description, 
+            datetime.utcnow(), datetime.utcnow())
+            
+            # Get the created document to return full details
+            created_doc = await conn.fetchrow(
+                "SELECT * FROM requested_documents WHERE requested_doc_id = $1", doc_id
+            )
+            
+            return {
+                "requested_doc_id": str(created_doc['requested_doc_id']),
+                "case_id": str(created_doc['case_id']),
+                "document_name": created_doc['document_name'],
+                "description": created_doc['description'],
+                "is_completed": created_doc['is_completed'],
+                "completed_at": created_doc['completed_at'].isoformat() if created_doc['completed_at'] else None,
+                "is_flagged_for_review": created_doc['is_flagged_for_review'],
+                "notes": created_doc['notes'],
+                "requested_at": created_doc['requested_at'].isoformat(),
+                "updated_at": created_doc['updated_at'].isoformat()
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create requested document: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 @router.put("/documents/{requested_doc_id}")

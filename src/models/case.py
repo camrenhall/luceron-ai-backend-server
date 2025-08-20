@@ -60,6 +60,17 @@ class CaseCreateRequest(BaseModel):
     client_phone: Optional[str] = None
     requested_documents: List[RequestedDocument]
 
+class CaseUpdateRequest(BaseModel):
+    client_name: Optional[str] = None
+    client_email: Optional[str] = None
+    client_phone: Optional[str] = None
+    status: Optional[CaseStatus] = None
+
+class RequestedDocumentCreateRequest(BaseModel):
+    case_id: str
+    document_name: str
+    description: Optional[str] = None
+
 class RequestedDocumentUpdateRequest(BaseModel):
     document_name: Optional[str] = None
     description: Optional[str] = None
