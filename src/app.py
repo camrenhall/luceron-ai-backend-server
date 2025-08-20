@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import PORT, ALLOWED_ORIGINS
 from database.connection import init_database, close_database
-from api.routes import health, documents, cases, emails, webhooks, alerts, agent_conversations, agent_messages, agent_summaries, agent_context
+from api.routes import health, documents, cases, emails, webhooks, alerts, agent_conversations, agent_messages, agent_summaries, agent_context, client_communications, error_logs
 from utils.error_handling import setup_error_handling
 
 # Configure logging
@@ -56,6 +56,8 @@ app.include_router(agent_conversations.router, prefix="/api/agent/conversations"
 app.include_router(agent_messages.router, prefix="/api/agent/messages", tags=["Agent Messages"])
 app.include_router(agent_summaries.router, prefix="/api/agent/summaries", tags=["Agent Summaries"])
 app.include_router(agent_context.router, prefix="/api/agent/context", tags=["Agent Context"])
+app.include_router(client_communications.router, prefix="/api/communications", tags=["Client Communications"])
+app.include_router(error_logs.router, prefix="/api/error-logs", tags=["Error Logs"])
 
 # FastAPI app instance is exported for use by uvicorn
 # Server startup is handled by main.py at the project root
