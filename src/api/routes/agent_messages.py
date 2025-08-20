@@ -3,6 +3,7 @@ Agent messages API routes
 """
 
 import logging
+import json
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 import asyncpg
@@ -43,20 +44,21 @@ async def create_message(
                 RETURNING message_id, conversation_id, role, content, total_tokens, model_used, 
                          function_name, function_arguments, function_response, created_at, sequence_number
             """, 
-            request.conversation_id, request.role.value, request.content,
+            request.conversation_id, request.role.value, json.dumps(request.content),
             request.total_tokens, request.model_used, request.function_name,
-            request.function_arguments, request.function_response)
+            json.dumps(request.function_arguments) if request.function_arguments else None,
+            json.dumps(request.function_response) if request.function_response else None)
             
             return AgentMessageResponse(
                 message_id=row['message_id'],
                 conversation_id=row['conversation_id'],
                 role=MessageRole(row['role']),
-                content=row['content'],
+                content=json.loads(row['content']) if row['content'] else {},
                 total_tokens=row['total_tokens'],
                 model_used=row['model_used'],
                 function_name=row['function_name'],
-                function_arguments=row['function_arguments'],
-                function_response=row['function_response'],
+                function_arguments=json.loads(row['function_arguments']) if row['function_arguments'] else None,
+                function_response=json.loads(row['function_response']) if row['function_response'] else None,
                 created_at=row['created_at'],
                 sequence_number=row['sequence_number']
             )
@@ -91,12 +93,12 @@ async def get_message(
                 message_id=row['message_id'],
                 conversation_id=row['conversation_id'],
                 role=MessageRole(row['role']),
-                content=row['content'],
+                content=json.loads(row['content']) if row['content'] else {},
                 total_tokens=row['total_tokens'],
                 model_used=row['model_used'],
                 function_name=row['function_name'],
-                function_arguments=row['function_arguments'],
-                function_response=row['function_response'],
+                function_arguments=json.loads(row['function_arguments']) if row['function_arguments'] else None,
+                function_response=json.loads(row['function_response']) if row['function_response'] else None,
                 created_at=row['created_at'],
                 sequence_number=row['sequence_number']
             )
@@ -125,7 +127,7 @@ async def update_message(
             
             if request.content is not None:
                 update_fields.append(f"content = ${param_count}")
-                update_values.append(request.content)
+                update_values.append(json.dumps(request.content))
                 param_count += 1
                 
             if request.total_tokens is not None:
@@ -135,7 +137,7 @@ async def update_message(
                 
             if request.function_response is not None:
                 update_fields.append(f"function_response = ${param_count}")
-                update_values.append(request.function_response)
+                update_values.append(json.dumps(request.function_response))
                 param_count += 1
             
             if not update_fields:
@@ -160,12 +162,12 @@ async def update_message(
                 message_id=row['message_id'],
                 conversation_id=row['conversation_id'],
                 role=MessageRole(row['role']),
-                content=row['content'],
+                content=json.loads(row['content']) if row['content'] else {},
                 total_tokens=row['total_tokens'],
                 model_used=row['model_used'],
                 function_name=row['function_name'],
-                function_arguments=row['function_arguments'],
-                function_response=row['function_response'],
+                function_arguments=json.loads(row['function_arguments']) if row['function_arguments'] else None,
+                function_response=json.loads(row['function_response']) if row['function_response'] else None,
                 created_at=row['created_at'],
                 sequence_number=row['sequence_number']
             )
@@ -249,12 +251,12 @@ async def list_messages(
                     message_id=row['message_id'],
                     conversation_id=row['conversation_id'],
                     role=MessageRole(row['role']),
-                    content=row['content'],
+                    content=json.loads(row['content']) if row['content'] else {},
                     total_tokens=row['total_tokens'],
                     model_used=row['model_used'],
                     function_name=row['function_name'],
-                    function_arguments=row['function_arguments'],
-                    function_response=row['function_response'],
+                    function_arguments=json.loads(row['function_arguments']) if row['function_arguments'] else None,
+                    function_response=json.loads(row['function_response']) if row['function_response'] else None,
                     created_at=row['created_at'],
                     sequence_number=row['sequence_number']
                 ) for row in rows
@@ -304,7 +306,7 @@ async def get_conversation_messages(
                     "message_id": row['message_id'],
                     "conversation_id": row['conversation_id'],
                     "role": MessageRole(row['role']),
-                    "content": row['content'],
+                    "content": json.loads(row['content']) if row['content'] else {},
                     "total_tokens": row['total_tokens'],
                     "model_used": row['model_used'],
                     "created_at": row['created_at'],
@@ -317,8 +319,8 @@ async def get_conversation_messages(
                 if include_function_calls:
                     message_data.update({
                         "function_name": row.get('function_name'),
-                        "function_arguments": row.get('function_arguments'),
-                        "function_response": row.get('function_response')
+                        "function_arguments": json.loads(row.get('function_arguments')) if row.get('function_arguments') else None,
+                        "function_response": json.loads(row.get('function_response')) if row.get('function_response') else None
                     })
                 
                 messages.append(AgentMessageResponse(**message_data))
