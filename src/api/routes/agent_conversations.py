@@ -29,15 +29,14 @@ async def create_conversation(
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow("""
-                INSERT INTO agent_conversations (case_id, agent_type, status)
-                VALUES ($1, $2, $3)
-                RETURNING conversation_id, case_id, agent_type, status, total_tokens_used, created_at, updated_at
-            """, request.case_id, request.agent_type.value, request.status.value)
+                INSERT INTO agent_conversations (agent_type, status)
+                VALUES ($1, $2)
+                RETURNING conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
+            """, request.agent_type.value, request.status.value)
             
             return AgentConversationResponse(
                 conversation_id=row['conversation_id'],
-                case_id=row['case_id'],
-                agent_type=AgentType(row['agent_type']),
+                                agent_type=AgentType(row['agent_type']),
                 status=ConversationStatus(row['status']),
                 total_tokens_used=row['total_tokens_used'],
                 created_at=row['created_at'],
@@ -59,7 +58,7 @@ async def get_conversation(
     try:
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow("""
-                SELECT conversation_id, case_id, agent_type, status, total_tokens_used, created_at, updated_at
+                SELECT conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
                 FROM agent_conversations 
                 WHERE conversation_id = $1
             """, conversation_id)
@@ -69,8 +68,7 @@ async def get_conversation(
             
             return AgentConversationResponse(
                 conversation_id=row['conversation_id'],
-                case_id=row['case_id'],
-                agent_type=AgentType(row['agent_type']),
+                                agent_type=AgentType(row['agent_type']),
                 status=ConversationStatus(row['status']),
                 total_tokens_used=row['total_tokens_used'],
                 created_at=row['created_at'],
@@ -113,7 +111,7 @@ async def update_conversation(
                 UPDATE agent_conversations 
                 SET {', '.join(update_fields)}, updated_at = NOW()
                 WHERE conversation_id = ${param_count}
-                RETURNING conversation_id, case_id, agent_type, status, total_tokens_used, created_at, updated_at
+                RETURNING conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
             """
             
             row = await conn.fetchrow(query, *update_values)
@@ -123,8 +121,7 @@ async def update_conversation(
             
             return AgentConversationResponse(
                 conversation_id=row['conversation_id'],
-                case_id=row['case_id'],
-                agent_type=AgentType(row['agent_type']),
+                                agent_type=AgentType(row['agent_type']),
                 status=ConversationStatus(row['status']),
                 total_tokens_used=row['total_tokens_used'],
                 created_at=row['created_at'],
@@ -165,7 +162,6 @@ async def delete_conversation(
 
 @router.get("", response_model=List[AgentConversationResponse])
 async def list_conversations(
-    case_id: Optional[str] = Query(None, description="Filter by case ID"),
     agent_type: Optional[AgentType] = Query(None, description="Filter by agent type"),
     status: Optional[ConversationStatus] = Query(None, description="Filter by status"),
     limit: int = Query(50, ge=1, le=500, description="Maximum number of results"),
@@ -182,11 +178,6 @@ async def list_conversations(
             query_params = []
             param_count = 1
             
-            if case_id:
-                where_conditions.append(f"case_id = ${param_count}")
-                query_params.append(case_id)
-                param_count += 1
-                
             if agent_type:
                 where_conditions.append(f"agent_type = ${param_count}")
                 query_params.append(agent_type.value)
@@ -200,7 +191,7 @@ async def list_conversations(
             where_clause = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
             
             query = f"""
-                SELECT conversation_id, case_id, agent_type, status, total_tokens_used, created_at, updated_at
+                SELECT conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
                 FROM agent_conversations 
                 {where_clause}
                 ORDER BY created_at DESC
@@ -213,8 +204,7 @@ async def list_conversations(
             return [
                 AgentConversationResponse(
                     conversation_id=row['conversation_id'],
-                    case_id=row['case_id'],
-                    agent_type=AgentType(row['agent_type']),
+                                        agent_type=AgentType(row['agent_type']),
                     status=ConversationStatus(row['status']),
                     total_tokens_used=row['total_tokens_used'],
                     created_at=row['created_at'],
@@ -240,7 +230,7 @@ async def get_conversation_with_messages(
         async with db_pool.acquire() as conn:
             # Get conversation
             conv_row = await conn.fetchrow("""
-                SELECT conversation_id, case_id, agent_type, status, total_tokens_used, created_at, updated_at
+                SELECT conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
                 FROM agent_conversations 
                 WHERE conversation_id = $1
             """, conversation_id)

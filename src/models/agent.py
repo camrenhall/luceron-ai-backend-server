@@ -26,7 +26,6 @@ class ConversationStatus(str, Enum):
 
 # Agent Conversations Models
 class AgentConversationCreate(BaseModel):
-    case_id: UUID
     agent_type: AgentType
     status: ConversationStatus = ConversationStatus.ACTIVE
 
@@ -35,7 +34,6 @@ class AgentConversationUpdate(BaseModel):
 
 class AgentConversationResponse(BaseModel):
     conversation_id: UUID
-    case_id: UUID
     agent_type: AgentType
     status: ConversationStatus
     total_tokens_used: int
