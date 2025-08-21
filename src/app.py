@@ -8,9 +8,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config.settings import PORT, ALLOWED_ORIGINS
+from config.settings import PORT, ALLOWED_ORIGINS, OPENAI_API_KEY
 from database.connection import init_database, close_database
-from api.routes import health, documents, cases, emails, webhooks, alerts, agent_conversations, agent_messages, agent_summaries, agent_context, client_communications, error_logs
+from api.routes import health, documents, cases, emails, webhooks, alerts, agent_conversations, agent_messages, agent_summaries, agent_context, client_communications, error_logs, agent_db
 from utils.error_handling import setup_error_handling
 
 # Configure logging
@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     await init_database()
+    
+    # Initialize agent gateway LLM client if API key is available
+    if OPENAI_API_KEY:
+        from agent_gateway.utils.llm_client import init_llm_client
+        init_llm_client(OPENAI_API_KEY)
+        logger.info("Agent gateway LLM client initialized")
+    else:
+        logger.warning("Agent gateway disabled - OPENAI_API_KEY not configured")
+    
     yield
     await close_database()
 
@@ -58,6 +67,13 @@ app.include_router(agent_summaries.router, prefix="/api/agent/summaries", tags=[
 app.include_router(agent_context.router, prefix="/api/agent/context", tags=["Agent Context"])
 app.include_router(client_communications.router, prefix="/api/communications", tags=["Client Communications"])
 app.include_router(error_logs.router, prefix="/api/error-logs", tags=["Error Logs"])
+
+# Add agent gateway endpoint if enabled
+if OPENAI_API_KEY:
+    app.include_router(agent_db.router, prefix="/api", tags=["Agent Gateway"])
+    logger.info("Agent gateway endpoint registered at /api/agent/db")
+else:
+    logger.info("Agent gateway endpoint disabled - OPENAI_API_KEY not configured")
 
 # FastAPI app instance is exported for use by uvicorn
 # Server startup is handled by main.py at the project root

@@ -5,13 +5,21 @@ Authentication utilities for API endpoints
 import logging
 from typing import Optional
 from fastapi import HTTPException, Header, Depends
+from dataclasses import dataclass
 
 from config.settings import API_KEY
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class AuthContext:
+    """Authentication context containing user information"""
+    is_authenticated: bool
+    role: str = "default"
+    actor_id: Optional[str] = None
 
-async def authenticate_api(authorization: Optional[str] = Header(None)):
+
+async def authenticate_api(authorization: Optional[str] = Header(None)) -> AuthContext:
     """
     FastAPI dependency for Bearer token authentication.
     
@@ -19,7 +27,7 @@ async def authenticate_api(authorization: Optional[str] = Header(None)):
         authorization: Authorization header with Bearer token
         
     Returns:
-        bool: True if authentication successful
+        AuthContext: Authentication context with role information
         
     Raises:
         HTTPException: 401 if authentication fails
@@ -62,7 +70,17 @@ async def authenticate_api(authorization: Optional[str] = Header(None)):
         )
     
     logger.info("AUTH: Authentication successful")
-    return True
+    
+    # For MVP, we'll extract role from the token itself or use default
+    # In future: decode JWT, query database, etc.
+    role = "default"
+    actor_id = "api_client"  # Could be extracted from token in future
+    
+    return AuthContext(
+        is_authenticated=True,
+        role=role,
+        actor_id=actor_id
+    )
 
 
 

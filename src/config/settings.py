@@ -20,6 +20,9 @@ API_KEY = os.getenv("API_KEY")
 RESEND_WEBHOOK_SECRET = os.getenv("RESEND_WEBHOOK_SECRET")
 ADMIN_ALERT_EMAILS = [email.strip() for email in os.getenv("ADMIN_ALERT_EMAILS", "admin@company.com").split(",")]
 
+# Agent gateway configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 # Validate required environment variables
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
@@ -27,6 +30,8 @@ if not RESEND_API_KEY:
     raise ValueError("RESEND_API_KEY environment variable is required")
 if not API_KEY:
     raise ValueError("API_KEY environment variable is required for authentication")
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not set - agent gateway will not be available")
 
 # Configure Resend
 resend.api_key = RESEND_API_KEY
