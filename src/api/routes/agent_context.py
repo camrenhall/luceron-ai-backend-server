@@ -7,13 +7,13 @@ import json
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Query
-import asyncpg
 
 from models.agent import (
     AgentContextCreate, AgentContextUpdate, AgentContextResponse,
     AgentType
 )
-from database.connection import get_db_pool
+from services.agent_services import get_agent_context_service
+from services.cases_service import get_cases_service
 from utils.auth import AuthConfig
 
 router = APIRouter()
@@ -25,51 +25,62 @@ async def create_context(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Create or update agent context (upsert based on case_id + agent_type + context_key)"""
-    db_pool = get_db_pool()
+    context_service = get_agent_context_service()
+    cases_service = get_cases_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Verify case exists
-            case_exists = await conn.fetchval(
-                "SELECT 1 FROM cases WHERE case_id = $1",
-                request.case_id
+        # Verify case exists
+        case_result = await cases_service.get_case_by_id(str(request.case_id))
+        if not case_result.success or not case_result.data:
+            raise HTTPException(status_code=404, detail="Case not found")
+        
+        # Check if context already exists for upsert behavior
+        existing_result = await context_service.get_context_by_key(
+            str(request.case_id), 
+            request.agent_type.value, 
+            request.context_key
+        )
+        
+        if existing_result.success and existing_result.data:
+            # Update existing context
+            context_id = existing_result.data[0]['context_id']
+            result = await context_service.update_context_value(context_id, request.context_value)
+        else:
+            # Create new context
+            expires_at_str = request.expires_at.isoformat() if request.expires_at else None
+            result = await context_service.create_context(
+                str(request.case_id),
+                request.agent_type.value,
+                request.context_key,
+                request.context_value,
+                expires_at_str
             )
-            
-            if not case_exists:
-                raise HTTPException(status_code=404, detail="Case not found")
-            
-            # Use upsert to handle duplicate key constraints
-            row = await conn.fetchrow("""
-                INSERT INTO agent_context 
-                (case_id, agent_type, context_key, context_value, expires_at)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (case_id, agent_type, context_key) 
-                DO UPDATE SET 
-                    context_value = EXCLUDED.context_value,
-                    expires_at = EXCLUDED.expires_at,
-                    updated_at = NOW()
-                RETURNING context_id, case_id, agent_type, context_key, context_value, 
-                         expires_at, created_at, updated_at
-            """, 
-            request.case_id, request.agent_type.value, request.context_key,
-            json.dumps(request.context_value), request.expires_at)
-            
-            return AgentContextResponse(
-                context_id=row['context_id'],
-                case_id=row['case_id'],
-                agent_type=AgentType(row['agent_type']),
-                context_key=row['context_key'],
-                context_value=json.loads(row['context_value']) if row['context_value'] else {},
-                expires_at=row['expires_at'],
-                created_at=row['created_at'],
-                updated_at=row['updated_at']
-            )
-            
+        
+        if not result.success:
+            if result.error_type == "UNAUTHORIZED_OPERATION":
+                raise HTTPException(status_code=403, detail=result.error)
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        context_data = result.data[0]
+        return AgentContextResponse(
+            context_id=context_data['context_id'],
+            case_id=context_data['case_id'],
+            agent_type=AgentType(context_data['agent_type']),
+            context_key=context_data['context_key'],
+            context_value=context_data['context_value'],
+            expires_at=datetime.fromisoformat(context_data['expires_at'].replace('Z', '+00:00')) if context_data.get('expires_at') and isinstance(context_data['expires_at'], str) else context_data.get('expires_at'),
+            created_at=datetime.fromisoformat(context_data['created_at'].replace('Z', '+00:00')) if isinstance(context_data['created_at'], str) else context_data['created_at'],
+            updated_at=datetime.fromisoformat(context_data['updated_at'].replace('Z', '+00:00')) if isinstance(context_data['updated_at'], str) else context_data['updated_at']
+        )
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to create context: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.get("/{context_id}", response_model=AgentContextResponse)
 async def get_context(
@@ -77,37 +88,31 @@ async def get_context(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Get context by ID"""
-    db_pool = get_db_pool()
+    context_service = get_agent_context_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                SELECT context_id, case_id, agent_type, context_key, context_value, 
-                       expires_at, created_at, updated_at
-                FROM agent_context 
-                WHERE context_id = $1 
-                AND (expires_at IS NULL OR expires_at > NOW())
-            """, context_id)
-            
-            if not row:
-                raise HTTPException(status_code=404, detail="Context not found or expired")
-            
-            return AgentContextResponse(
-                context_id=row['context_id'],
-                case_id=row['case_id'],
-                agent_type=AgentType(row['agent_type']),
-                context_key=row['context_key'],
-                context_value=json.loads(row['context_value']) if row['context_value'] else {},
-                expires_at=row['expires_at'],
-                created_at=row['created_at'],
-                updated_at=row['updated_at']
-            )
-            
+        result = await context_service.get_context_by_id(context_id)
+        
+        if not result.success or not result.data:
+            raise HTTPException(status_code=404, detail="Context not found or expired")
+        
+        context_data = result.data[0]
+        return AgentContextResponse(
+            context_id=context_data['context_id'],
+            case_id=context_data['case_id'],
+            agent_type=AgentType(context_data['agent_type']),
+            context_key=context_data['context_key'],
+            context_value=context_data['context_value'],
+            expires_at=datetime.fromisoformat(context_data['expires_at'].replace('Z', '+00:00')) if context_data.get('expires_at') and isinstance(context_data['expires_at'], str) else context_data.get('expires_at'),
+            created_at=datetime.fromisoformat(context_data['created_at'].replace('Z', '+00:00')) if isinstance(context_data['created_at'], str) else context_data['created_at'],
+            updated_at=datetime.fromisoformat(context_data['updated_at'].replace('Z', '+00:00')) if isinstance(context_data['updated_at'], str) else context_data['updated_at']
+        )
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get context: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.put("/{context_id}", response_model=AgentContextResponse)
 async def update_context(

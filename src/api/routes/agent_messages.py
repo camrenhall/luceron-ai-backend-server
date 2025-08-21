@@ -7,7 +7,6 @@ import logging
 import json
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
-import asyncpg
 
 from models.agent import (
     AgentMessageCreate, AgentMessageUpdate, AgentMessageResponse,

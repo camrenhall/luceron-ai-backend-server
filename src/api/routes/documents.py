@@ -29,7 +29,8 @@ from models.document import (
     DocumentAnalysisByCaseResponse,
     DocumentAnalysisAggregatedSummary
 )
-from database.connection import get_db_pool
+from services.documents_service import get_documents_service, get_document_analysis_service
+from services.cases_service import get_cases_service
 from utils.auth import AuthConfig
 from utils.error_handling import set_endpoint_context, log_business_error
 
@@ -148,79 +149,76 @@ async def create_document(
     """
     set_endpoint_context("document_creation")
     start_time = time.time()
-    db_pool = get_db_pool()
+    documents_service = get_documents_service()
+    cases_service = get_cases_service()
     
     logger.info(f"Creating document: {request.original_file_name} for case {request.case_id}")
     
     try:
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                # Validate case exists
-                case_exists = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
-                    request.case_id
+        # Validate case exists
+        case_result = await cases_service.get_case_by_id(request.case_id)
+        if not case_result.success or not case_result.data:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Case {request.case_id} not found"
+            )
+        
+        # Create document using service
+        result = await documents_service.create_document(
+            case_id=request.case_id,
+            original_file_name=request.original_file_name,
+            original_file_size=request.original_file_size,
+            original_file_type=request.original_file_type,
+            original_s3_location=request.original_s3_location,
+            original_s3_key=request.original_s3_key,
+            batch_id=request.batch_id,
+            status=request.status
+        )
+        
+        if not result.success:
+            processing_time = int((time.time() - start_time) * 1000)
+            logger.error(f"Document creation failed: {result.error}, processing_time={processing_time}ms")
+            
+            if result.error_type == "CONFLICT":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Document with same identifiers already exists"
                 )
-                if not case_exists:
-                    raise HTTPException(
-                        status_code=404, 
-                        detail=f"Case {request.case_id} not found"
-                    )
-                
-                # Insert document record and get generated UUID
-                document_id = await conn.fetchval("""
-                    INSERT INTO documents (
-                        case_id, original_file_name, original_file_size, 
-                        original_file_type, original_s3_location, original_s3_key,
-                        batch_id, status
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    RETURNING document_id
-                """, 
-                request.case_id, request.original_file_name, request.original_file_size,
-                request.original_file_type, request.original_s3_location, 
-                request.original_s3_key, request.batch_id, request.status)
-                
-                # Get the created timestamp
-                created_at = await conn.fetchval(
-                    "SELECT created_at FROM documents WHERE document_id = $1",
-                    document_id
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid request: {result.error}"
                 )
-                
-                processing_time = int((time.time() - start_time) * 1000)
-                
-                logger.info(f"Document created successfully: document_id={document_id}, "
-                           f"processing_time={processing_time}ms")
-                
-                return DocumentCreateResponse(
-                    success=True,
-                    document_id=document_id,
-                    case_id=request.case_id,
-                    original_file_name=request.original_file_name,
-                    status=request.status,
-                    created_at=created_at
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Document creation failed: {result.error}"
                 )
-                
+        
+        document_data = result.data[0]
+        processing_time = int((time.time() - start_time) * 1000)
+        
+        logger.info(f"Document created successfully: document_id={document_data['document_id']}, "
+                   f"processing_time={processing_time}ms")
+        
+        return DocumentCreateResponse(
+            success=True,
+            document_id=document_data['document_id'],
+            case_id=document_data['case_id'],
+            original_file_name=document_data['original_file_name'],
+            status=document_data['status'],
+            created_at=datetime.fromisoformat(document_data['created_at'].replace('Z', '+00:00')) if isinstance(document_data['created_at'], str) else document_data['created_at']
+        )
+        
     except HTTPException:
         raise
     except Exception as e:
         processing_time = int((time.time() - start_time) * 1000)
         logger.error(f"Document creation failed: {e}, processing_time={processing_time}ms")
-        
-        # Check for constraint violations
-        if "foreign key constraint" in str(e).lower():
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid case_id: {request.case_id}"
-            )
-        elif "duplicate key" in str(e).lower():
-            raise HTTPException(
-                status_code=409,
-                detail="Document with same identifiers already exists"
-            )
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Document creation failed: {str(e)}"
-            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Service error: {str(e)}"
+        )
 
 
 @router.put("/{document_id}", response_model=DocumentUpdateResponse)

@@ -5,7 +5,6 @@ Agent conversations API routes
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
-import asyncpg
 
 from models.agent import (
     AgentConversationCreate, AgentConversationUpdate, AgentConversationResponse,

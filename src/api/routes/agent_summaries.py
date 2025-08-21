@@ -5,7 +5,6 @@ Agent summaries API routes
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
-import asyncpg
 
 from models.agent import (
     AgentSummaryCreate, AgentSummaryUpdate, AgentSummaryResponse

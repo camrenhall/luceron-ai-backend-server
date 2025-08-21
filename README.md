@@ -50,11 +50,13 @@ graph TB
 
 ### Design Patterns and Architectural Decisions
 
-1. **Async/Await Pattern**: Fully asynchronous architecture for high concurrency
-2. **Repository Pattern**: Database operations abstracted through connection pool
-3. **DTO Pattern**: Pydantic models for request/response validation
-4. **Middleware Pattern**: CORS and error handling via FastAPI middleware
-5. **Dependency Injection**: Authentication and database connections via FastAPI dependencies
+1. **Unified Service Layer Pattern**: All database operations go through a consistent service layer
+2. **Agent Gateway Integration**: Natural language interface and REST APIs share the same data foundation
+3. **Async/Await Pattern**: Fully asynchronous architecture for high concurrency
+4. **Service Pattern**: Business logic abstracted through domain-specific services
+5. **DTO Pattern**: Pydantic models for request/response validation
+6. **Middleware Pattern**: CORS and error handling via FastAPI middleware
+7. **Dependency Injection**: Authentication and database connections via FastAPI dependencies
 
 ### System Dependencies and Integration Points
 
@@ -68,26 +70,68 @@ graph LR
     AA[Analysis Agent] --> |REST API| BS
 ```
 
-### Data Flow Architecture
+### Unified Architecture Flow
 
 ```mermaid
 sequenceDiagram
-    participant Client
-    participant Backend
-    participant Database
-    participant Resend
+    participant NL as Natural Language
+    participant AG as Agent Gateway
+    participant Service as Service Layer
+    participant REST as REST API
+    participant DB as Database
     
-    Client->>Backend: API Request
-    Backend->>Database: Query/Update
-    Database-->>Backend: Result
-    Backend->>Resend: Send Email (if needed)
-    Resend-->>Backend: Email ID
-    Backend-->>Client: Response
-    Resend->>Backend: Webhook (async)
-    Backend->>Database: Update Status
+    Note over NL,AG: Natural Language Interface
+    NL->>AG: "Get all cases for client@example.com"
+    AG->>Service: Parsed DSL → Service Call
+    Service->>DB: SQL Query
+    DB-->>Service: Results
+    Service-->>AG: Structured Response
+    AG-->>NL: Natural Language Response
+    
+    Note over REST,Service: REST Interface
+    REST->>Service: Direct Service Call
+    Service->>DB: SQL Query
+    DB-->>Service: Results
+    Service-->>REST: JSON Response
 ```
 
+### Agent Gateway - Natural Language Interface
+
+The backend includes a sophisticated Agent Gateway that converts natural language queries into database operations:
+
+#### Key Components:
+1. **Router**: Maps natural language to appropriate resources and operations
+2. **Planner**: Converts natural language + context into structured DSL (Domain Specific Language)
+3. **Validator**: Ensures DSL operations comply with security contracts and field permissions
+4. **Executor**: Executes validated DSL through the unified service layer
+5. **Contracts**: Define field-level permissions and operation constraints
+
+#### Endpoint:
+- `POST /agent/db` - Natural language database interface
+
+#### Example Usage:
+```json
+{
+  "natural_language": "Show me all open cases for client@example.com",
+  "hints": {
+    "resources": ["cases"],
+    "intent": "READ"
+  }
+}
+```
+
+This provides a powerful way for AI agents to interact with the database using natural language while maintaining security and validation.
+
 ## API Documentation
+
+### Architecture Overview
+
+The Luceron AI Backend Server provides two primary interfaces:
+
+1. **REST API**: Traditional HTTP endpoints for direct database operations
+2. **Agent Gateway**: Natural language interface for AI agents
+
+Both interfaces utilize the same unified service layer, ensuring consistent business logic, validation, and data access patterns.
 
 ### Authentication
 
@@ -96,7 +140,38 @@ All endpoints require API key authentication via the `X-API-Key` header:
 X-API-Key: {API_KEY}
 ```
 
-### Core API Endpoints
+### Agent Gateway API
+
+#### Natural Language Database Interface
+- `POST /agent/db` - Convert natural language to database operations
+- Request Schema:
+```json
+{
+  "natural_language": "string - Natural language query",
+  "hints": {
+    "resources": ["cases", "documents"],
+    "intent": "READ|INSERT|UPDATE",
+    "filters": {"key": "value"}
+  }
+}
+```
+
+- Response Schema:
+```json
+{
+  "success": true,
+  "operation": "READ|INSERT|UPDATE",
+  "resource": "cases",
+  "data": [...],
+  "count": 10,
+  "page": {
+    "limit": 100,
+    "offset": 0
+  }
+}
+```
+
+### Core REST API Endpoints
 
 #### Health Check
 - `GET /` - Health check endpoint
@@ -593,6 +668,46 @@ Currently no feature flags implemented. Consider adding:
    - System error tracking
    - Columns: `error_id`, `component`, `error_message`, `severity`, `context` (JSON), `email_sent`, `created_at`
 
+### Service Layer Architecture
+
+The backend implements a unified service layer that provides consistent data access patterns:
+
+#### Service Components
+
+1. **Base Service** (`services/base_service.py`)
+   - Provides common CRUD operations (Create, Read, Update)
+   - Handles validation through Agent Gateway contracts
+   - Manages database connections and transactions
+
+2. **Domain Services**
+   - **Cases Service**: Case management operations with search capabilities
+   - **Documents Service**: Document and analysis management
+   - **Communications Service**: Email/SMS tracking and status updates
+   - **Agent Services**: AI agent state management (conversations, messages, summaries, context)
+   - **Error Logs Service**: System error tracking and monitoring
+
+#### Service Pattern Example
+```python
+from services.cases_service import get_cases_service
+
+# Get service instance
+cases_service = get_cases_service()
+
+# Perform operations
+result = await cases_service.create_case(
+    client_name="John Doe",
+    client_email="john@example.com",
+    status="OPEN"
+)
+
+# All services return consistent ServiceResult objects
+if result.success:
+    case_data = result.data[0]
+    print(f"Created case: {case_data['case_id']}")
+else:
+    print(f"Error: {result.error}")
+```
+
 ### Query Patterns
 
 1. **Connection Pooling**
@@ -601,6 +716,7 @@ Currently no feature flags implemented. Consider adding:
    - Command timeout: 60 seconds
 
 2. **Transaction Boundaries**
+   - Service layer manages transactions automatically
    - Case creation: Single transaction
    - Bulk analysis storage: Single transaction with rollback
    - Document updates: Auto-commit
@@ -609,6 +725,7 @@ Currently no feature flags implemented. Consider adding:
    - Batch validation queries for bulk operations
    - Index usage on `case_id`, `document_id`, `batch_id`
    - JSONB indexing for `analysis_content` queries
+   - Service-level caching potential for frequently accessed data
 
 ### Database Connection Management
 
@@ -1162,6 +1279,18 @@ def function(param: str) -> dict:
 **Rationale**: Horizontal scalability, Cloud Run compatibility
 **Consequences**: No WebSocket support initially, polling for updates
 
+### ADR-005: Unified Service Layer Architecture
+**Decision**: Implement unified service layer for all database operations
+**Rationale**: Consistent data access patterns, shared business logic between REST and Agent Gateway
+**Consequences**: Additional abstraction layer, but improved maintainability and consistency
+**Date**: December 2024
+
+### ADR-006: Agent Gateway Integration
+**Decision**: Natural language interface shares service layer with REST APIs
+**Rationale**: Avoid code duplication, ensure consistent business logic, unified validation
+**Consequences**: Agent Gateway operations go through service layer rather than direct SQL
+**Date**: December 2024
+
 ## Contact and Support
 
 For questions or issues related to this component:
@@ -1173,6 +1302,18 @@ For questions or issues related to this component:
 
 ---
 
-*Last Updated: December 2024*
-*Version: 1.0.0*
+## Recent Updates
+
+### December 2024 - Unified Service Layer Migration
+- ✅ **Completed MVP Migration**: Successfully migrated from direct database access to unified service layer
+- ✅ **Agent Gateway Integration**: Natural language interface now uses same service foundation as REST APIs
+- ✅ **Backward Compatibility**: All existing API endpoints continue working without changes
+- ✅ **Architecture Unification**: Both interfaces now share consistent business logic and validation
+
+This migration provides a solid foundation for future development while maintaining production stability.
+
+---
+
+*Last Updated: December 21, 2024*
+*Version: 2.0.0 (Post-Service Layer Migration)*
 *Maintained by: Luceron AI Backend Team*

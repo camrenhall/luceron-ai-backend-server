@@ -8,8 +8,9 @@ from dataclasses import dataclass
 
 from agent_gateway.contracts.registry import get_all_contracts
 from agent_gateway.validator import get_validator, ValidationError
-from agent_gateway.executor import get_executor, ExecutorResult
 from agent_gateway.models.dsl import DSL, ReadOperation, UpdateOperation, InsertOperation, WhereClause, OrderByClause
+from database.connection import get_db_pool
+import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,6 @@ class BaseService:
         self.resource_name = resource_name
         self.role = role
         self.validator = get_validator()
-        self.executor = get_executor()
         self.contracts = get_all_contracts(role)
         
         if resource_name not in self.contracts:
@@ -66,13 +66,13 @@ class BaseService:
                     error_type=validation_error.error_type
                 )
             
-            # Execute operation
-            result = await self.executor.execute(dsl, self.contracts, self.role)
+            # Execute operation directly
+            result = await self._execute_insert_sql(dsl)
             
             return ServiceResult(
                 success=True,
-                data=result.data,
-                count=result.count
+                data=result["data"],
+                count=result["count"]
             )
             
         except Exception as e:
@@ -157,14 +157,14 @@ class BaseService:
                     error_type=validation_error.error_type
                 )
             
-            # Execute operation
-            result = await self.executor.execute(dsl, self.contracts, self.role)
+            # Execute operation directly
+            result = await self._execute_read_sql(dsl)
             
             return ServiceResult(
                 success=True,
-                data=result.data,
-                count=result.count,
-                page_info=result.page_info
+                data=result["data"],
+                count=result["count"],
+                page_info=result.get("page_info")
             )
             
         except Exception as e:
@@ -221,13 +221,13 @@ class BaseService:
                     error_type=validation_error.error_type
                 )
             
-            # Execute operation
-            result = await self.executor.execute(dsl, self.contracts, self.role)
+            # Execute operation directly
+            result = await self._execute_update_sql(dsl)
             
             return ServiceResult(
                 success=True,
-                data=result.data,
-                count=result.count
+                data=result["data"],
+                count=result["count"]
             )
             
         except Exception as e:
@@ -308,3 +308,322 @@ class BaseService:
     def is_field_writable(self, field_name: str) -> bool:
         """Check if a field is writable"""
         return self.contract.is_field_writable(field_name)
+    
+    # Direct SQL execution methods (avoid circular dependency with executor)
+    
+    async def _execute_read_sql(self, dsl: DSL) -> Dict[str, Any]:
+        """Execute READ DSL directly via SQL"""
+        operation = dsl.get_primary_operation()
+        
+        db_pool = get_db_pool()
+        if not db_pool:
+            raise RuntimeError("Database pool not initialized")
+        
+        async with db_pool.acquire() as conn:
+            query, params = self._build_read_query(operation)
+            
+            logger.info(f"Executing READ query: {query}")
+            logger.info(f"Parameters: {params}")
+            
+            try:
+                rows = await conn.fetch(query, *params)
+                data = [dict(row) for row in rows]
+                
+                # Convert datetime objects to ISO strings
+                for row in data:
+                    for key, value in row.items():
+                        if hasattr(value, 'isoformat'):
+                            row[key] = value.isoformat()
+                
+                # Build pagination info
+                page_info = None
+                if operation.offset > 0 or operation.limit < 1000:  # reasonable default
+                    page_info = {
+                        "limit": operation.limit,
+                        "offset": operation.offset
+                    }
+                
+                return {
+                    "data": data,
+                    "count": len(data),
+                    "page_info": page_info
+                }
+                
+            except asyncpg.PostgresError as e:
+                logger.error(f"Database error: {e}")
+                raise RuntimeError(f"Database query failed: {str(e)}")
+    
+    async def _execute_insert_sql(self, dsl: DSL) -> Dict[str, Any]:
+        """Execute INSERT DSL directly via SQL"""
+        operation = dsl.get_primary_operation()
+        
+        db_pool = get_db_pool()
+        if not db_pool:
+            raise RuntimeError("Database pool not initialized")
+        
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                query, params = self._build_insert_query(operation)
+                
+                logger.info(f"Executing INSERT: {query}")
+                logger.info(f"Parameters: {params}")
+                
+                try:
+                    row = await conn.fetchrow(query, *params)
+                    data = [dict(row)]
+                    
+                    # Convert datetime objects to ISO strings
+                    for row_dict in data:
+                        for key, value in row_dict.items():
+                            if hasattr(value, 'isoformat'):
+                                row_dict[key] = value.isoformat()
+                    
+                    return {
+                        "data": data,
+                        "count": 1
+                    }
+                    
+                except asyncpg.UniqueViolationError as e:
+                    logger.warning(f"Unique constraint violation: {e}")
+                    raise RuntimeError("CONFLICT: Unique constraint violation")
+                except asyncpg.PostgresError as e:
+                    logger.error(f"Database error during INSERT: {e}")
+                    raise RuntimeError(f"Database INSERT failed: {str(e)}")
+    
+    async def _execute_update_sql(self, dsl: DSL) -> Dict[str, Any]:
+        """Execute UPDATE DSL directly via SQL"""
+        operation = dsl.get_primary_operation()
+        
+        db_pool = get_db_pool()
+        if not db_pool:
+            raise RuntimeError("Database pool not initialized")
+        
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                query, params = self._build_update_query(operation)
+                
+                logger.info(f"Executing UPDATE: {query}")
+                logger.info(f"Parameters: {params}")
+                
+                try:
+                    row = await conn.fetchrow(query, *params)
+                    
+                    if not row:
+                        raise RuntimeError(f"No record found with specified ID for update")
+                    
+                    data = [dict(row)]
+                    
+                    # Convert datetime objects to ISO strings
+                    for row_dict in data:
+                        for key, value in row_dict.items():
+                            if hasattr(value, 'isoformat'):
+                                row_dict[key] = value.isoformat()
+                    
+                    return {
+                        "data": data,
+                        "count": 1
+                    }
+                    
+                except asyncpg.UniqueViolationError as e:
+                    logger.warning(f"Unique constraint violation: {e}")
+                    raise RuntimeError("CONFLICT: Unique constraint violation")
+                except asyncpg.PostgresError as e:
+                    logger.error(f"Database error during UPDATE: {e}")
+                    raise RuntimeError(f"Database UPDATE failed: {str(e)}")
+    
+    def _build_read_query(self, operation: ReadOperation) -> tuple[str, List[Any]]:
+        """Build SQL query from READ operation DSL"""
+        
+        # Resource table mapping
+        resource_tables = {
+            "cases": "cases",
+            "client_communications": "client_communications", 
+            "documents": "documents",
+            "document_analysis": "document_analysis_aggregated",
+            "error_logs": "error_logs",
+            "agent_context": "agent_context",
+            "agent_conversations": "agent_conversations",
+            "agent_messages": "agent_messages",
+            "agent_summaries": "agent_summaries"
+        }
+        
+        table_name = resource_tables[operation.resource]
+        params = []
+        param_counter = 1
+        
+        # SELECT clause
+        select_fields = ", ".join(operation.select)
+        query = f"SELECT {select_fields} FROM {table_name}"
+        
+        # WHERE clause
+        if operation.where:
+            where_parts = []
+            for where_clause in operation.where:
+                where_sql, where_params, param_counter = self._build_where_clause(
+                    where_clause, param_counter
+                )
+                where_parts.append(where_sql)
+                params.extend(where_params)
+            
+            query += f" WHERE {' AND '.join(where_parts)}"
+        
+        # ORDER BY clause
+        if operation.order_by:
+            order_parts = []
+            for order_clause in operation.order_by:
+                direction = order_clause.dir.upper()
+                order_parts.append(f"{order_clause.field} {direction}")
+            
+            query += f" ORDER BY {', '.join(order_parts)}"
+        
+        # LIMIT and OFFSET
+        query += f" LIMIT ${param_counter}"
+        params.append(operation.limit)
+        param_counter += 1
+        
+        if operation.offset > 0:
+            query += f" OFFSET ${param_counter}"
+            params.append(operation.offset)
+            param_counter += 1
+        
+        return query, params
+    
+    def _build_insert_query(self, operation: InsertOperation) -> tuple[str, List[Any]]:
+        """Build SQL INSERT query from DSL"""
+        
+        # Resource table mapping
+        resource_tables = {
+            "cases": "cases",
+            "client_communications": "client_communications", 
+            "documents": "documents",
+            "document_analysis": "document_analysis_aggregated",
+            "error_logs": "error_logs",
+            "agent_context": "agent_context",
+            "agent_conversations": "agent_conversations",
+            "agent_messages": "agent_messages",
+            "agent_summaries": "agent_summaries"
+        }
+        
+        table_name = resource_tables[operation.resource]
+        params = []
+        param_counter = 1
+        
+        # Fields and values
+        field_names = list(operation.values.keys())
+        field_placeholders = []
+        
+        for value in operation.values.values():
+            field_placeholders.append(f"${param_counter}")
+            params.append(value)
+            param_counter += 1
+        
+        # Add created_at if not provided (auto-managed)
+        if 'created_at' not in field_names:
+            field_names.append('created_at')
+            field_placeholders.append('NOW()')
+        
+        query = f"""
+            INSERT INTO {table_name} ({', '.join(field_names)})
+            VALUES ({', '.join(field_placeholders)})
+            RETURNING *
+        """
+        
+        return query, params
+    
+    def _build_update_query(self, operation: UpdateOperation) -> tuple[str, List[Any]]:
+        """Build SQL UPDATE query from DSL"""
+        
+        # Resource table mapping
+        resource_tables = {
+            "cases": "cases",
+            "client_communications": "client_communications", 
+            "documents": "documents",
+            "document_analysis": "document_analysis_aggregated",
+            "error_logs": "error_logs",
+            "agent_context": "agent_context",
+            "agent_conversations": "agent_conversations",
+            "agent_messages": "agent_messages",
+            "agent_summaries": "agent_summaries"
+        }
+        
+        table_name = resource_tables[operation.resource]
+        params = []
+        param_counter = 1
+        
+        # SET clause
+        set_parts = []
+        for field_name, value in operation.update.items():
+            set_parts.append(f"{field_name} = ${param_counter}")
+            params.append(value)
+            param_counter += 1
+        
+        query = f"UPDATE {table_name} SET {', '.join(set_parts)}"
+        
+        # WHERE clause (required for UPDATE)
+        where_parts = []
+        for where_clause in operation.where:
+            where_sql, where_params, param_counter = self._build_where_clause(
+                where_clause, param_counter
+            )
+            where_parts.append(where_sql)
+            params.extend(where_params)
+        
+        query += f" WHERE {' AND '.join(where_parts)}"
+        
+        # RETURNING clause to get post-image
+        query += " RETURNING *"
+        
+        return query, params
+    
+    def _build_where_clause(self, where_clause: WhereClause, param_counter: int) -> tuple[str, List[Any], int]:
+        """Build WHERE clause SQL from DSL where clause"""
+        
+        field = where_clause.field
+        op = where_clause.op
+        value = where_clause.value
+        
+        params = []
+        
+        if op == "=":
+            sql = f"{field} = ${param_counter}"
+            params.append(value)
+            param_counter += 1
+        elif op == "!=":
+            sql = f"{field} != ${param_counter}"
+            params.append(value)
+            param_counter += 1
+        elif op in [">", ">=", "<", "<="]:
+            sql = f"{field} {op} ${param_counter}"
+            params.append(value)
+            param_counter += 1
+        elif op == "LIKE":
+            sql = f"{field} LIKE ${param_counter}"
+            params.append(value)
+            param_counter += 1
+        elif op == "ILIKE":
+            sql = f"{field} ILIKE ${param_counter}"
+            params.append(value)
+            param_counter += 1
+        elif op == "IN":
+            if isinstance(value, list):
+                placeholders = []
+                for item in value:
+                    placeholders.append(f"${param_counter}")
+                    params.append(item)
+                    param_counter += 1
+                sql = f"{field} IN ({', '.join(placeholders)})"
+            else:
+                sql = f"{field} = ${param_counter}"
+                params.append(value)
+                param_counter += 1
+        elif op == "BETWEEN":
+            if isinstance(value, list) and len(value) == 2:
+                sql = f"{field} BETWEEN ${param_counter} AND ${param_counter + 1}"
+                params.extend(value)
+                param_counter += 2
+            else:
+                raise ValueError(f"BETWEEN operator requires array of 2 values, got: {value}")
+        else:
+            raise ValueError(f"Unsupported WHERE operator: {op}")
+        
+        return sql, params, param_counter

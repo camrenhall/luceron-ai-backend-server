@@ -6,7 +6,6 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
-import asyncpg
 
 from models.communication import (
     ClientCommunicationCreateRequest, 
@@ -14,7 +13,8 @@ from models.communication import (
     ClientCommunicationResponse
 )
 from models.enums import CommunicationChannel, CommunicationDirection, DeliveryStatus
-from database.connection import get_db_pool
+from services.communications_service import get_communications_service
+from services.cases_service import get_cases_service
 from utils.auth import AuthConfig
 
 router = APIRouter()
@@ -26,57 +26,61 @@ async def create_communication(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Create a new client communication record"""
-    db_pool = get_db_pool()
+    communications_service = get_communications_service()
+    cases_service = get_cases_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Verify case exists
-            case_exists = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
-                request.case_id
-            )
-            if not case_exists:
-                raise HTTPException(status_code=404, detail="Case not found")
-            
-            communication_id = await conn.fetchval("""
-                INSERT INTO client_communications 
-                (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at, resend_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                RETURNING communication_id
-            """,
-            request.case_id, request.channel.value, request.direction.value,
-            request.status.value, request.sender, request.recipient, request.subject,
-            request.message_content, request.sent_at, request.resend_id)
-            
-            # Get the created communication
-            communication = await conn.fetchrow("""
-                SELECT communication_id, case_id, channel, direction, status, sender, recipient,
-                       subject, message_content, created_at, sent_at, opened_at, resend_id
-                FROM client_communications 
-                WHERE communication_id = $1
-            """, communication_id)
-            
-            return ClientCommunicationResponse(
-                communication_id=communication['communication_id'],
-                case_id=communication['case_id'],
-                channel=CommunicationChannel(communication['channel']),
-                direction=CommunicationDirection(communication['direction']),
-                status=DeliveryStatus(communication['status']),
-                sender=communication['sender'],
-                recipient=communication['recipient'],
-                subject=communication['subject'],
-                message_content=communication['message_content'],
-                created_at=communication['created_at'],
-                sent_at=communication['sent_at'],
-                opened_at=communication['opened_at'],
-                resend_id=communication['resend_id']
-            )
-            
+        # Verify case exists
+        case_result = await cases_service.get_case_by_id(request.case_id)
+        if not case_result.success or not case_result.data:
+            raise HTTPException(status_code=404, detail="Case not found")
+        
+        # Convert sent_at to ISO string if needed
+        sent_at_str = request.sent_at.isoformat() if request.sent_at else None
+        
+        result = await communications_service.create_communication(
+            case_id=request.case_id,
+            channel=request.channel.value,
+            direction=request.direction.value,
+            sender=request.sender,
+            recipient=request.recipient,
+            message_content=request.message_content,
+            subject=request.subject,
+            status=request.status.value,
+            sent_at=sent_at_str,
+            resend_id=request.resend_id
+        )
+        
+        if not result.success:
+            if result.error_type == "UNAUTHORIZED_OPERATION":
+                raise HTTPException(status_code=403, detail=result.error)
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        communication_data = result.data[0]
+        return ClientCommunicationResponse(
+            communication_id=communication_data['communication_id'],
+            case_id=communication_data['case_id'],
+            channel=CommunicationChannel(communication_data['channel']),
+            direction=CommunicationDirection(communication_data['direction']),
+            status=DeliveryStatus(communication_data['status']),
+            sender=communication_data['sender'],
+            recipient=communication_data['recipient'],
+            subject=communication_data['subject'],
+            message_content=communication_data['message_content'],
+            created_at=datetime.fromisoformat(communication_data['created_at'].replace('Z', '+00:00')) if isinstance(communication_data['created_at'], str) else communication_data['created_at'],
+            sent_at=datetime.fromisoformat(communication_data['sent_at'].replace('Z', '+00:00')) if communication_data.get('sent_at') and isinstance(communication_data['sent_at'], str) else communication_data.get('sent_at'),
+            opened_at=datetime.fromisoformat(communication_data['opened_at'].replace('Z', '+00:00')) if communication_data.get('opened_at') and isinstance(communication_data['opened_at'], str) else communication_data.get('opened_at'),
+            resend_id=communication_data['resend_id']
+        )
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to create communication: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.get("/{communication_id}", response_model=ClientCommunicationResponse)
 async def get_communication(

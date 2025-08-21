@@ -5,11 +5,10 @@ Case management API routes
 import logging
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Query
-import asyncpg
 
 from models.case import CaseCreateRequest, CaseUpdateRequest, CaseSearchQuery, CaseSearchResponse, DateOperator
 from models.enums import CaseStatus
-from database.connection import get_db_pool
+from services.cases_service import get_cases_service
 from utils.auth import AuthConfig
 
 router = APIRouter()
@@ -21,36 +20,40 @@ async def create_case(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Create a new case"""
-    db_pool = get_db_pool()
+    cases_service = get_cases_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                # Create the case and get the generated UUID
-                case_id = await conn.fetchval("""
-                    INSERT INTO cases (client_name, client_email, client_phone, status, created_at)
-                    VALUES ($1, $2, $3, $4, $5)
-                    RETURNING case_id
-                """, 
-                request.client_name, request.client_email, 
-                request.client_phone, CaseStatus.OPEN.value, datetime.utcnow())
-                
-                # Note: requested_documents data is now stored elsewhere
-                
-            
-            return {
-                "case_id": str(case_id),
-                "client_name": request.client_name,
-                "client_email": request.client_email,
-                "client_phone": request.client_phone,
-                "status": CaseStatus.OPEN.value
-            }
-            
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="Case ID already exists")
+        result = await cases_service.create_case(
+            client_name=request.client_name,
+            client_email=request.client_email,
+            client_phone=request.client_phone,
+            status=CaseStatus.OPEN.value
+        )
+        
+        if not result.success:
+            if result.error_type == "CONFLICT" or "unique" in result.error.lower():
+                raise HTTPException(status_code=409, detail="Case ID already exists")
+            elif result.error_type == "UNAUTHORIZED_OPERATION":
+                raise HTTPException(status_code=403, detail=result.error)
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        case_data = result.data[0]
+        return {
+            "case_id": str(case_data['case_id']),
+            "client_name": case_data['client_name'],
+            "client_email": case_data['client_email'],
+            "client_phone": case_data['client_phone'],
+            "status": case_data['status']
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create case: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.get("/{case_id}")
 async def get_case(
@@ -58,39 +61,52 @@ async def get_case(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Get case details"""
-    db_pool = get_db_pool()
+    cases_service = get_cases_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            case_row = await conn.fetchrow(
-                "SELECT * FROM cases WHERE case_id = $1", case_id
-            )
-            
-            if not case_row:
-                raise HTTPException(status_code=404, detail="Case not found")
-            
-            # Get last communication date from client_communications
-            last_comm = await conn.fetchrow("""
-                SELECT created_at 
-                FROM client_communications 
-                WHERE case_id = $1 
-                ORDER BY created_at DESC 
-                LIMIT 1
-            """, case_id)
-            
-            return {
-                "case_id": case_row['case_id'],
-                "client_name": case_row['client_name'],
-                "client_email": case_row['client_email'],
-                "client_phone": case_row['client_phone'],
-                "status": case_row['status'],
-                "created_at": case_row['created_at'].isoformat(),
-                "last_communication_date": last_comm['created_at'].isoformat() if last_comm else None
-            }
-            
+        # Get case data
+        result = await cases_service.get_case_by_id(case_id)
+        
+        if not result.success or not result.data:
+            raise HTTPException(status_code=404, detail="Case not found")
+        
+        case_data = result.data[0]
+        
+        # Get last communication date using communications service
+        from services.communications_service import get_communications_service
+        communications_service = get_communications_service()
+        
+        comm_result = await communications_service.read(
+            filters={"case_id": case_id},
+            order_by=[{"field": "created_at", "dir": "desc"}],
+            limit=1
+        )
+        
+        last_communication_date = None
+        if comm_result.success and comm_result.data:
+            last_comm = comm_result.data[0]
+            last_comm_date = last_comm.get('created_at')
+            if last_comm_date:
+                if isinstance(last_comm_date, str):
+                    last_communication_date = last_comm_date
+                else:
+                    last_communication_date = last_comm_date.isoformat()
+        
+        return {
+            "case_id": case_data['case_id'],
+            "client_name": case_data['client_name'],
+            "client_email": case_data['client_email'],
+            "client_phone": case_data['client_phone'],
+            "status": case_data['status'],
+            "created_at": case_data['created_at'].isoformat() if isinstance(case_data['created_at'], datetime) else case_data['created_at'],
+            "last_communication_date": last_communication_date
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get case: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.put("/{case_id}")
 async def update_case(
