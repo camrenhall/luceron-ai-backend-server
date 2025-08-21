@@ -65,15 +65,6 @@ async def authenticate_api(authorization: Optional[str] = Header(None)):
     return True
 
 
-def require_auth():
-    """
-    Mandatory authentication dependency for all API endpoints.
-    
-    Usage:
-        @router.post("/endpoint", dependencies=[Depends(require_auth)])
-    """
-    return Depends(authenticate_api)
-
 
 class AuthConfig:
     """

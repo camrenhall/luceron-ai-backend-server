@@ -43,6 +43,3 @@ class CaseStatus(str, Enum):
     OPEN = "OPEN"
     CLOSED = "CLOSED"
 
-# Backward compatibility aliases - use Status instead
-DocumentStatus = Status
-AnalysisStatus = Status
