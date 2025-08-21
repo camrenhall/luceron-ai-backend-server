@@ -38,27 +38,11 @@ class CaseData(BaseModel):
     status: CaseStatus
     created_at: datetime
 
-class RequestedDocument(BaseModel):
-    document_name: str
-    description: Optional[str] = None
-
-class RequestedDocumentData(BaseModel):
-    requested_doc_id: UUID
-    document_name: str
-    description: Optional[str] = None
-    is_completed: bool = False
-    completed_at: Optional[datetime] = None
-    is_flagged_for_review: bool = False
-    notes: Optional[str] = None
-    requested_at: datetime
-    updated_at: datetime
-    case_id: UUID
 
 class CaseCreateRequest(BaseModel):
     client_name: str
     client_email: str
     client_phone: Optional[str] = None
-    requested_documents: List[RequestedDocument]
 
 class CaseUpdateRequest(BaseModel):
     client_name: Optional[str] = None
@@ -66,17 +50,6 @@ class CaseUpdateRequest(BaseModel):
     client_phone: Optional[str] = None
     status: Optional[CaseStatus] = None
 
-class RequestedDocumentCreateRequest(BaseModel):
-    case_id: str
-    document_name: str
-    description: Optional[str] = None
-
-class RequestedDocumentUpdateRequest(BaseModel):
-    document_name: Optional[str] = None
-    description: Optional[str] = None
-    is_completed: Optional[bool] = None
-    is_flagged_for_review: Optional[bool] = None
-    notes: Optional[str] = None
 
 class CaseResponse(BaseModel):
     case_id: UUID
@@ -85,7 +58,6 @@ class CaseResponse(BaseModel):
     client_phone: Optional[str] = None
     status: CaseStatus
     created_at: datetime
-    requested_documents: Optional[List[RequestedDocumentData]] = None
 
 class CaseSearchQuery(BaseModel):
     """Search query parameters for cases"""

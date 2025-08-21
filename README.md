@@ -107,25 +107,19 @@ X-API-Key: {API_KEY}
 
 ##### Create Case
 - `POST /api/cases`
-- Creates new case with requested documents
+- Creates new case
 - Request Schema:
 ```json
 {
   "client_name": "string",
   "client_email": "email",
-  "client_phone": "string",
-  "requested_documents": [
-    {
-      "document_name": "string",
-      "description": "string"
-    }
-  ]
+  "client_phone": "string"
 }
 ```
 
 ##### Get Case Details
 - `GET /api/cases/{case_id}`
-- Returns case details with requested documents
+- Returns case details
 
 ##### Search Cases
 - `POST /api/cases/search`
@@ -146,9 +140,6 @@ X-API-Key: {API_KEY}
 - `GET /api/cases/{case_id}/analysis-summary`
 - Returns document analysis summary for a case
 
-##### Update Requested Document
-- `PUT /api/cases/documents/{requested_doc_id}`
-- Updates requested document status/details
 
 #### Documents API
 
@@ -564,23 +555,19 @@ Currently no feature flags implemented. Consider adding:
    - Columns: `case_id`, `client_name`, `client_email`, `client_phone`, `status`, `created_at`
    - Status enum: `OPEN`, `CLOSED`
 
-2. **requested_documents**
-   - Tracks documents requested from clients
-   - Columns: `requested_doc_id`, `case_id`, `document_name`, `description`, `is_completed`, `completed_at`, `is_flagged_for_review`, `notes`
-
-3. **documents**
+2. **documents**
    - Document file metadata
    - Columns: `document_id`, `case_id`, `original_file_name`, `original_s3_location`, `processed_file_name`, `processed_s3_location`, `status`, `batch_id`
 
-4. **document_analysis**
+3. **document_analysis**
    - OpenAI analysis results
    - Columns: `analysis_id`, `document_id`, `case_id`, `analysis_content` (JSON), `analysis_status`, `model_used`, `tokens_used`, `analysis_reasoning`
 
-5. **client_communications**
+4. **client_communications**
    - Communication audit trail
    - Columns: `communication_id`, `case_id`, `channel`, `direction`, `status`, `opened_at`, `sender`, `recipient`, `subject`, `message_content`, `resend_id`
 
-6. **Agent State Management Tables**
+5. **Agent State Management Tables**
    
    **agent_conversations**
    - Conversation session management
@@ -602,7 +589,7 @@ Currently no feature flags implemented. Consider adding:
    - Columns: `context_id`, `case_id`, `agent_type`, `context_key`, `context_value` (JSONB), `expires_at`, `created_at`, `updated_at`
    - Unique constraint: `(case_id, agent_type, context_key)`
 
-7. **error_logs**
+6. **error_logs**
    - System error tracking
    - Columns: `error_id`, `component`, `error_message`, `severity`, `context` (JSON), `email_sent`, `created_at`
 
@@ -614,7 +601,7 @@ Currently no feature flags implemented. Consider adding:
    - Command timeout: 60 seconds
 
 2. **Transaction Boundaries**
-   - Case creation with documents: Single transaction
+   - Case creation: Single transaction
    - Bulk analysis storage: Single transaction with rollback
    - Document updates: Auto-commit
 

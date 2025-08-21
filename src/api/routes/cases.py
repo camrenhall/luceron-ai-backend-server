@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Query
 import asyncpg
 
-from models.case import CaseCreateRequest, CaseUpdateRequest, RequestedDocumentCreateRequest, RequestedDocumentUpdateRequest, CaseSearchQuery, CaseSearchResponse, DateOperator
+from models.case import CaseCreateRequest, CaseUpdateRequest, CaseSearchQuery, CaseSearchResponse, DateOperator
 from models.enums import CaseStatus
 from database.connection import get_db_pool
 from utils.auth import AuthConfig
@@ -35,21 +35,7 @@ async def create_case(
                 request.client_name, request.client_email, 
                 request.client_phone, CaseStatus.OPEN.value, datetime.utcnow())
                 
-                # Insert requested documents with returned UUIDs
-                requested_doc_ids = []
-                for doc in request.requested_documents:
-                    doc_id = await conn.fetchval("""
-                        INSERT INTO requested_documents (case_id, document_name, description, requested_at, updated_at)
-                        VALUES ($1, $2, $3, $4, $5)
-                        RETURNING requested_doc_id
-                    """,
-                    case_id, doc.document_name, doc.description, 
-                    datetime.utcnow(), datetime.utcnow())
-                    requested_doc_ids.append({
-                        "requested_doc_id": str(doc_id),
-                        "document_name": doc.document_name,
-                        "description": doc.description
-                    })
+                # Note: requested_documents data is now stored elsewhere
                 
             
             return {
@@ -57,8 +43,7 @@ async def create_case(
                 "client_name": request.client_name,
                 "client_email": request.client_email,
                 "client_phone": request.client_phone,
-                "status": CaseStatus.OPEN.value,
-                "requested_documents": requested_doc_ids
+                "status": CaseStatus.OPEN.value
             }
             
     except asyncpg.UniqueViolationError:
@@ -84,15 +69,6 @@ async def get_case(
             if not case_row:
                 raise HTTPException(status_code=404, detail="Case not found")
             
-            # Get requested documents for this case
-            requested_docs = await conn.fetch("""
-                SELECT requested_doc_id, document_name, description, is_completed, completed_at, 
-                       is_flagged_for_review, notes, requested_at, updated_at
-                FROM requested_documents 
-                WHERE case_id = $1 
-                ORDER BY requested_at ASC
-            """, case_id)
-            
             # Get last communication date from client_communications
             last_comm = await conn.fetchrow("""
                 SELECT created_at 
@@ -109,20 +85,7 @@ async def get_case(
                 "client_phone": case_row['client_phone'],
                 "status": case_row['status'],
                 "created_at": case_row['created_at'].isoformat(),
-                "last_communication_date": last_comm['created_at'].isoformat() if last_comm else None,
-                "requested_documents": [
-                    {
-                        "requested_doc_id": str(doc['requested_doc_id']),
-                        "document_name": doc['document_name'],
-                        "description": doc['description'],
-                        "is_completed": doc['is_completed'],
-                        "completed_at": doc['completed_at'].isoformat() if doc['completed_at'] else None,
-                        "is_flagged_for_review": doc['is_flagged_for_review'],
-                        "notes": doc['notes'],
-                        "requested_at": doc['requested_at'].isoformat(),
-                        "updated_at": doc['updated_at'].isoformat()
-                    } for doc in requested_docs
-                ]
+                "last_communication_date": last_comm['created_at'].isoformat() if last_comm else None
             }
             
     except Exception as e:
@@ -224,11 +187,6 @@ async def delete_case(
                 if not existing_case:
                     raise HTTPException(status_code=404, detail="Case not found")
                 
-                # Delete associated requested documents first (due to foreign key constraints)
-                await conn.execute(
-                    "DELETE FROM requested_documents WHERE case_id = $1", case_id
-                )
-                
                 # Delete associated communications
                 await conn.execute(
                     "DELETE FROM client_communications WHERE case_id = $1", case_id
@@ -276,15 +234,6 @@ async def get_case_communications(
             if not case_row:
                 raise HTTPException(status_code=404, detail="Case not found")
             
-            # Get requested documents for this case
-            requested_docs = await conn.fetch("""
-                SELECT requested_doc_id, document_name, description, is_completed, completed_at, 
-                       is_flagged_for_review, notes, requested_at, updated_at
-                FROM requested_documents 
-                WHERE case_id = $1 
-                ORDER BY requested_at ASC
-            """, case_id)
-            
             # Get communication history from new table
             communications = await conn.fetch("""
                 SELECT communication_id, channel, direction, status, opened_at, sender, recipient, 
@@ -301,19 +250,6 @@ async def get_case_communications(
                 "client_email": case_row['client_email'],
                 "client_phone": case_row['client_phone'],
                 "case_status": case_row['status'],
-                "requested_documents": [
-                    {
-                        "requested_doc_id": str(doc['requested_doc_id']),
-                        "document_name": doc['document_name'],
-                        "description": doc['description'],
-                        "is_completed": doc['is_completed'],
-                        "completed_at": doc['completed_at'].isoformat() if doc['completed_at'] else None,
-                        "is_flagged_for_review": doc['is_flagged_for_review'],
-                        "notes": doc['notes'],
-                        "requested_at": doc['requested_at'].isoformat(),
-                        "updated_at": doc['updated_at'].isoformat()
-                    } for doc in requested_docs
-                ],
                 "last_communication_date": communications[0]['created_at'].isoformat() if communications else None,
                 "communication_summary": {
                     "total_communications": len(communications),
@@ -655,28 +591,13 @@ async def get_pending_reminder_cases(
             
             cases = []
             for row in rows:
-                # Get requested documents for each case
-                requested_docs = await conn.fetch("""
-                    SELECT document_name, description, is_completed
-                    FROM requested_documents 
-                    WHERE case_id = $1 
-                    ORDER BY requested_at ASC
-                """, row['case_id'])
-                
                 cases.append({
                     "case_id": row['case_id'],
                     "client_email": row['client_email'],
                     "client_name": row['client_name'],
                     "client_phone": row['client_phone'],
                     "status": row['status'],
-                    "last_communication_date": row['last_communication_date'].isoformat() if row['last_communication_date'] else None,
-                    "requested_documents": [
-                        {
-                            "document_name": doc['document_name'],
-                            "description": doc['description'],
-                            "is_completed": doc['is_completed']
-                        } for doc in requested_docs
-                    ]
+                    "last_communication_date": row['last_communication_date'].isoformat() if row['last_communication_date'] else None
                 })
             
             return {"found_cases": len(cases), "cases": cases}
@@ -685,185 +606,3 @@ async def get_pending_reminder_cases(
         logger.error(f"Failed to get pending cases: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@router.post("/documents")
-async def create_requested_document(
-    request: RequestedDocumentCreateRequest,
-    _: bool = Depends(AuthConfig.get_auth_dependency())
-):
-    """Create a new requested document for an existing case"""
-    db_pool = get_db_pool()
-    
-    try:
-        async with db_pool.acquire() as conn:
-            # Check if case exists
-            case_exists = await conn.fetchrow(
-                "SELECT case_id FROM cases WHERE case_id = $1", request.case_id
-            )
-            
-            if not case_exists:
-                raise HTTPException(status_code=404, detail="Case not found")
-            
-            # Create the requested document
-            doc_id = await conn.fetchval("""
-                INSERT INTO requested_documents (case_id, document_name, description, requested_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5)
-                RETURNING requested_doc_id
-            """,
-            request.case_id, request.document_name, request.description, 
-            datetime.utcnow(), datetime.utcnow())
-            
-            # Get the created document to return full details
-            created_doc = await conn.fetchrow(
-                "SELECT * FROM requested_documents WHERE requested_doc_id = $1", doc_id
-            )
-            
-            return {
-                "requested_doc_id": str(created_doc['requested_doc_id']),
-                "case_id": str(created_doc['case_id']),
-                "document_name": created_doc['document_name'],
-                "description": created_doc['description'],
-                "is_completed": created_doc['is_completed'],
-                "completed_at": created_doc['completed_at'].isoformat() if created_doc['completed_at'] else None,
-                "is_flagged_for_review": created_doc['is_flagged_for_review'],
-                "notes": created_doc['notes'],
-                "requested_at": created_doc['requested_at'].isoformat(),
-                "updated_at": created_doc['updated_at'].isoformat()
-            }
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to create requested document: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@router.put("/documents/{requested_doc_id}")
-async def update_requested_document(
-    requested_doc_id: str,
-    request: RequestedDocumentUpdateRequest,
-    _: bool = Depends(AuthConfig.get_auth_dependency())
-):
-    """Update a requested document"""
-    db_pool = get_db_pool()
-    
-    try:
-        async with db_pool.acquire() as conn:
-            # Check if document exists
-            existing_doc = await conn.fetchrow(
-                "SELECT * FROM requested_documents WHERE requested_doc_id = $1", 
-                requested_doc_id
-            )
-            
-            if not existing_doc:
-                raise HTTPException(status_code=404, detail="Requested document not found")
-            
-            # Build dynamic update query based on provided fields
-            update_fields = []
-            update_values = []
-            param_count = 1
-            
-            if request.document_name is not None:
-                update_fields.append(f"document_name = ${param_count}")
-                update_values.append(request.document_name)
-                param_count += 1
-                
-            if request.description is not None:
-                update_fields.append(f"description = ${param_count}")
-                update_values.append(request.description)
-                param_count += 1
-                
-            if request.is_completed is not None:
-                update_fields.append(f"is_completed = ${param_count}")
-                update_values.append(request.is_completed)
-                param_count += 1
-                
-                # Set completed_at timestamp if marking as completed
-                if request.is_completed:
-                    update_fields.append(f"completed_at = ${param_count}")
-                    update_values.append(datetime.utcnow())
-                    param_count += 1
-                else:
-                    update_fields.append(f"completed_at = ${param_count}")
-                    update_values.append(None)
-                    param_count += 1
-                    
-            if request.is_flagged_for_review is not None:
-                update_fields.append(f"is_flagged_for_review = ${param_count}")
-                update_values.append(request.is_flagged_for_review)
-                param_count += 1
-                
-            if request.notes is not None:
-                update_fields.append(f"notes = ${param_count}")
-                update_values.append(request.notes)
-                param_count += 1
-            
-            if not update_fields:
-                raise HTTPException(status_code=400, detail="No fields provided for update")
-            
-            # Always update the updated_at timestamp
-            update_fields.append(f"updated_at = ${param_count}")
-            update_values.append(datetime.utcnow())
-            update_values.append(requested_doc_id)  # for WHERE clause
-            
-            query = f"""
-                UPDATE requested_documents 
-                SET {', '.join(update_fields)}
-                WHERE requested_doc_id = ${param_count + 1}
-                RETURNING *
-            """
-            
-            updated_doc = await conn.fetchrow(query, *update_values)
-            
-            return {
-                "requested_doc_id": str(updated_doc['requested_doc_id']),
-                "document_name": updated_doc['document_name'],
-                "description": updated_doc['description'],
-                "is_completed": updated_doc['is_completed'],
-                "completed_at": updated_doc['completed_at'].isoformat() if updated_doc['completed_at'] else None,
-                "is_flagged_for_review": updated_doc['is_flagged_for_review'],
-                "notes": updated_doc['notes'],
-                "requested_at": updated_doc['requested_at'].isoformat(),
-                "updated_at": updated_doc['updated_at'].isoformat(),
-                "case_id": str(updated_doc['case_id'])
-            }
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update requested document: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@router.delete("/documents/{requested_doc_id}")
-async def delete_requested_document(
-    requested_doc_id: str,
-    _: bool = Depends(AuthConfig.get_auth_dependency())
-):
-    """Delete a requested document"""
-    db_pool = get_db_pool()
-    
-    try:
-        async with db_pool.acquire() as conn:
-            # Check if document exists
-            existing_doc = await conn.fetchrow(
-                "SELECT * FROM requested_documents WHERE requested_doc_id = $1", 
-                requested_doc_id
-            )
-            
-            if not existing_doc:
-                raise HTTPException(status_code=404, detail="Requested document not found")
-            
-            # Delete the document
-            await conn.execute(
-                "DELETE FROM requested_documents WHERE requested_doc_id = $1",
-                requested_doc_id
-            )
-            
-            return {
-                "message": "Requested document deleted successfully",
-                "deleted_doc_id": requested_doc_id
-            }
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete requested document: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
