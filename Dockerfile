@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Copy the application code and modules
 COPY main.py .
+COPY prompts/ ./prompts/
 COPY src/ ./src/
 
 RUN useradd --create-home --shell /bin/bash backend \
