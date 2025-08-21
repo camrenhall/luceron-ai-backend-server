@@ -359,7 +359,7 @@ async def get_case_analysis_summary(
             # Get analysis results for all documents in the case
             analysis_rows = await conn.fetch("""
                 SELECT da.analysis_id, da.document_id, d.original_file_name,
-                       da.analysis_status, da.analyzed_at, da.model_used
+                       da.analysis_status, da.analyzed_at, da.model_used, da.context_summary_created
                 FROM document_analysis da
                 JOIN documents d ON da.document_id = d.document_id
                 WHERE da.case_id = $1
@@ -375,7 +375,8 @@ async def get_case_analysis_summary(
                     "filename": row['original_file_name'],
                     "analysis_status": row['analysis_status'],
                     "analyzed_at": row['analyzed_at'].isoformat(),
-                    "model_used": row['model_used']
+                    "model_used": row['model_used'],
+                    "context_summary_created": row['context_summary_created']
                 })
             
             return {

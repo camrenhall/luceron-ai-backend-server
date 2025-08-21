@@ -490,13 +490,13 @@ async def bulk_store_document_analysis(
                         analysis_id = await conn.fetchval("""
                             INSERT INTO document_analysis 
                             (document_id, case_id, analysis_content, 
-                             analysis_status, model_used, tokens_used, analyzed_at, analysis_reasoning)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                             analysis_status, model_used, tokens_used, analyzed_at, analysis_reasoning, context_summary_created)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                             RETURNING analysis_id
                         """, 
                         analysis.document_id, analysis.case_id,
                         analysis.analysis_content, analysis.analysis_status, 
-                        analysis.model_used, analysis.tokens_used, analysis.analyzed_at, analysis.analysis_reasoning)
+                        analysis.model_used, analysis.tokens_used, analysis.analyzed_at, analysis.analysis_reasoning, analysis.context_summary_created)
                         
                         # Update document status to completed
                         await conn.execute("""
@@ -581,13 +581,13 @@ async def store_document_analysis(
             analysis_id = await conn.fetchval("""
                 INSERT INTO document_analysis 
                 (document_id, case_id, analysis_content, 
-                 analysis_status, model_used, tokens_used, analyzed_at, analysis_reasoning)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 analysis_status, model_used, tokens_used, analyzed_at, analysis_reasoning, context_summary_created)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING analysis_id
             """, 
             document_id, request.case_id,
             request.analysis_content, request.analysis_status, request.model_used,
-            request.tokens_used, datetime.utcnow(), request.analysis_reasoning)
+            request.tokens_used, datetime.utcnow(), request.analysis_reasoning, request.context_summary_created)
             
             # Update document status to completed
             await conn.execute(
@@ -623,7 +623,7 @@ async def get_document_analysis(
         async with db_pool.acquire() as conn:
             analysis_row = await conn.fetchrow("""
                 SELECT analysis_id, document_id, case_id, analysis_content,
-                       analysis_status, model_used, tokens_used, analyzed_at, created_at, analysis_reasoning
+                       analysis_status, model_used, tokens_used, analyzed_at, created_at, analysis_reasoning, context_summary_created
                 FROM document_analysis 
                 WHERE document_id = $1
                 ORDER BY analyzed_at DESC
@@ -719,7 +719,7 @@ async def get_all_analyses_by_case(
                     SELECT da.analysis_id, da.document_id, da.case_id, 
                            da.analysis_content, da.analysis_status, da.model_used,
                            da.tokens_used, da.analyzed_at, da.created_at, da.analysis_reasoning,
-                           d.original_file_name
+                           da.context_summary_created, d.original_file_name
                     FROM document_analysis da
                     JOIN documents d ON da.document_id = d.document_id
                     WHERE da.case_id = $1
@@ -730,7 +730,7 @@ async def get_all_analyses_by_case(
                     SELECT da.analysis_id, da.document_id, da.case_id,
                            da.analysis_status, da.model_used,
                            da.tokens_used, da.analyzed_at, da.created_at,
-                           d.original_file_name
+                           da.context_summary_created, d.original_file_name
                     FROM document_analysis da
                     JOIN documents d ON da.document_id = d.document_id
                     WHERE da.case_id = $1
@@ -758,7 +758,8 @@ async def get_all_analyses_by_case(
                     tokens_used=row['tokens_used'],
                     analyzed_at=row['analyzed_at'],
                     created_at=row['created_at'],
-                    analysis_reasoning=row.get('analysis_reasoning')
+                    analysis_reasoning=row.get('analysis_reasoning'),
+                    context_summary_created=row.get('context_summary_created', False)
                 )
                 analyses.append(analysis_data)
             

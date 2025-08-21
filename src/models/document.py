@@ -35,6 +35,7 @@ class DocumentAnalysisData(BaseModel):
     analyzed_at: datetime
     created_at: datetime
     analysis_reasoning: Optional[str] = None
+    context_summary_created: bool = False
 
 class AnalysisResultRequest(BaseModel):
     document_id: UUID
@@ -44,6 +45,7 @@ class AnalysisResultRequest(BaseModel):
     tokens_used: Optional[int] = None
     analysis_status: Status = Status.COMPLETED
     analysis_reasoning: Optional[str] = None
+    context_summary_created: bool = False
 
 class AnalysisResultResponse(BaseModel):
     analysis_id: UUID
@@ -120,6 +122,7 @@ class BulkAnalysisRecord(BaseModel):
     tokens_used: Optional[int] = Field(None, ge=0, description="Number of tokens consumed")
     analyzed_at: datetime = Field(..., description="ISO timestamp when analysis was performed")
     analysis_reasoning: Optional[str] = Field(None, description="Reasoning behind the analysis process")
+    context_summary_created: bool = Field(False, description="Whether context summary has been created for this analysis")
     
     @validator('analysis_content')
     def validate_analysis_content(cls, v):
@@ -276,6 +279,7 @@ class DocumentAnalysisUpdateRequest(BaseModel):
     model_used: Optional[str] = Field(None, description="Updated model identifier")
     tokens_used: Optional[int] = Field(None, ge=0, description="Updated token count")
     analysis_reasoning: Optional[str] = Field(None, description="Updated reasoning behind the analysis process")
+    context_summary_created: Optional[bool] = Field(None, description="Whether context summary has been created")
     
     @validator('analysis_content')
     def validate_analysis_content(cls, v):
