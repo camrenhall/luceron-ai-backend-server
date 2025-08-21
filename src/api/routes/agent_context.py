@@ -3,6 +3,7 @@ Agent context API routes
 """
 
 import logging
+import json
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -51,14 +52,14 @@ async def create_context(
                          expires_at, created_at, updated_at
             """, 
             request.case_id, request.agent_type.value, request.context_key,
-            request.context_value, request.expires_at)
+            json.dumps(request.context_value), request.expires_at)
             
             return AgentContextResponse(
                 context_id=row['context_id'],
                 case_id=row['case_id'],
                 agent_type=AgentType(row['agent_type']),
                 context_key=row['context_key'],
-                context_value=row['context_value'],
+                context_value=json.loads(row['context_value']) if row['context_value'] else {},
                 expires_at=row['expires_at'],
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -96,7 +97,7 @@ async def get_context(
                 case_id=row['case_id'],
                 agent_type=AgentType(row['agent_type']),
                 context_key=row['context_key'],
-                context_value=row['context_value'],
+                context_value=json.loads(row['context_value']) if row['context_value'] else {},
                 expires_at=row['expires_at'],
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -126,7 +127,7 @@ async def update_context(
             
             if request.context_value is not None:
                 update_fields.append(f"context_value = ${param_count}")
-                update_values.append(request.context_value)
+                update_values.append(json.dumps(request.context_value))
                 param_count += 1
                 
             if request.expires_at is not None:
@@ -158,7 +159,7 @@ async def update_context(
                 case_id=row['case_id'],
                 agent_type=AgentType(row['agent_type']),
                 context_key=row['context_key'],
-                context_value=row['context_value'],
+                context_value=json.loads(row['context_value']) if row['context_value'] else {},
                 expires_at=row['expires_at'],
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -255,7 +256,7 @@ async def list_context(
                     case_id=row['case_id'],
                     agent_type=AgentType(row['agent_type']),
                     context_key=row['context_key'],
-                    context_value=row['context_value'],
+                    context_value=json.loads(row['context_value']) if row['context_value'] else {},
                     expires_at=row['expires_at'],
                     created_at=row['created_at'],
                     updated_at=row['updated_at']
@@ -295,7 +296,7 @@ async def get_case_agent_context(
             """, case_id, agent_type.value)
             
             # Return as a dictionary mapping context_key to context_value
-            context_map = {row['context_key']: row['context_value'] for row in rows}
+            context_map = {row['context_key']: json.loads(row['context_value']) if row['context_value'] else {} for row in rows}
             
             return context_map
             
@@ -329,7 +330,7 @@ async def get_specific_context_value(
             
             return {
                 "context_key": context_key,
-                "context_value": row['context_value'],
+                "context_value": json.loads(row['context_value']) if row['context_value'] else {},
                 "expires_at": row['expires_at'].isoformat() if row['expires_at'] else None
             }
             
