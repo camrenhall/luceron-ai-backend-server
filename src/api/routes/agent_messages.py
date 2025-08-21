@@ -2,6 +2,7 @@
 Agent messages API routes
 """
 
+import asyncio
 import logging
 import json
 from typing import List, Optional
@@ -14,6 +15,7 @@ from models.agent import (
 )
 from database.connection import get_db_pool
 from utils.auth import AuthConfig
+from services.summary_service import trigger_summary_generation
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -49,7 +51,8 @@ async def create_message(
             json.dumps(request.function_arguments) if request.function_arguments else None,
             json.dumps(request.function_response) if request.function_response else None)
             
-            return AgentMessageResponse(
+            # Create response
+            response = AgentMessageResponse(
                 message_id=row['message_id'],
                 conversation_id=row['conversation_id'],
                 role=MessageRole(row['role']),
@@ -62,6 +65,11 @@ async def create_message(
                 created_at=row['created_at'],
                 sequence_number=row['sequence_number']
             )
+            
+            # Trigger async summary generation in background
+            asyncio.create_task(trigger_summary_generation(str(request.conversation_id)))
+            
+            return response
             
     except HTTPException:
         raise
@@ -158,7 +166,8 @@ async def update_message(
             if not row:
                 raise HTTPException(status_code=404, detail="Message not found")
             
-            return AgentMessageResponse(
+            # Create response
+            response = AgentMessageResponse(
                 message_id=row['message_id'],
                 conversation_id=row['conversation_id'],
                 role=MessageRole(row['role']),
@@ -171,6 +180,11 @@ async def update_message(
                 created_at=row['created_at'],
                 sequence_number=row['sequence_number']
             )
+            
+            # Trigger async summary generation in background
+            asyncio.create_task(trigger_summary_generation(str(row['conversation_id'])))
+            
+            return response
             
     except HTTPException:
         raise

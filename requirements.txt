@@ -5,3 +5,4 @@ resend
 pydantic
 httpx
 svix
+openai
