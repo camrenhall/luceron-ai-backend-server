@@ -31,7 +31,12 @@ class Executor:
             "cases": "cases",
             "client_communications": "client_communications", 
             "documents": "documents",
-            "document_analysis": "document_analysis"
+            "document_analysis": "document_analysis",
+            "error_logs": "error_logs",
+            "agent_context": "agent_context",
+            "agent_conversations": "agent_conversations",
+            "agent_messages": "agent_messages",
+            "agent_summaries": "agent_summaries"
         }
     
     async def execute(
