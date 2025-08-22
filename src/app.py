@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import PORT, ALLOWED_ORIGINS, OPENAI_API_KEY
 from database.connection import init_database, close_database
-from api.routes import health, documents, cases, emails, webhooks, alerts, agent_conversations, agent_messages, agent_summaries, agent_context, client_communications, error_logs, agent_db
+from api.routes import health, documents, cases, emails, webhooks, alerts, agent_conversations, agent_messages, agent_summaries, agent_context, client_communications, error_logs, agent_db, oauth2
 from utils.error_handling import setup_error_handling
 
 # Configure logging
@@ -56,6 +56,7 @@ setup_error_handling(app)
 
 # Include API routes
 app.include_router(health.router, tags=["Health"])
+app.include_router(oauth2.router, tags=["OAuth2"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(cases.router, prefix="/api/cases", tags=["Cases"])
 app.include_router(emails.router, prefix="/api", tags=["Emails"])
