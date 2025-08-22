@@ -7,3 +7,4 @@ httpx
 svix
 openai
 PyJWT
+cryptography
