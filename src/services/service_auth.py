@@ -67,12 +67,14 @@ class ServiceAuthenticator:
                 logger.error(f"Invalid public key for service {service_id}: {e}")
                 return None
             
-            # Verify JWT signature and claims
+            # Verify JWT signature and claims with relaxed timing validation
+            # We disable built-in iat validation and handle timing in _validate_service_claims
             payload = jwt.decode(
                 service_jwt,
                 public_key,
                 algorithms=[self.algorithm],
-                audience=self.EXPECTED_AUDIENCE
+                audience=self.EXPECTED_AUDIENCE,
+                options={"verify_iat": False}  # Disable iat validation - we handle timing manually
             )
             
             # Validate claims
