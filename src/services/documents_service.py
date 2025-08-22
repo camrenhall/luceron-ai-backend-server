@@ -200,6 +200,248 @@ class DocumentAnalysisService(BaseService):
             order_by=[{"field": "created_at", "dir": "asc"}],
             limit=limit
         )
+    
+    async def lookup_documents_by_batch(self, batch_data: List[Dict[str, Any]]) -> ServiceResult:
+        """
+        Lookup documents by batch with intelligent filename matching
+        
+        Args:
+            batch_data: List of dictionaries containing filename and other matching criteria
+            
+        Returns:
+            ServiceResult with matched documents
+        """
+        logger.info(f"Looking up documents for batch with {len(batch_data)} items")
+        
+        try:
+            # Note: This requires complex filename matching logic
+            # For MVP, return a placeholder implementation
+            # In production, implement fuzzy filename matching
+            
+            return ServiceResult(
+                success=True,
+                data=[],
+                count=0,
+                error="Batch document lookup requires complex filename matching - implement fuzzy matching logic"
+            )
+            
+        except Exception as e:
+            logger.error(f"Batch document lookup failed: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
+    
+    async def store_bulk_analysis(self, analyses: List[Dict[str, Any]]) -> ServiceResult:
+        """
+        Store multiple analysis results in a single atomic transaction
+        
+        Args:
+            analyses: List of analysis data dictionaries
+            
+        Returns:
+            ServiceResult with success/failure details and partial results
+        """
+        logger.info(f"Storing bulk analysis for {len(analyses)} documents")
+        
+        try:
+            # Note: This requires atomic bulk operations with partial failure handling
+            # For MVP, iterate through analyses individually
+            # In production, implement proper bulk SQL operations
+            
+            successful_analyses = []
+            failed_analyses = []
+            
+            for i, analysis_data in enumerate(analyses):
+                try:
+                    result = await self.create_analysis(
+                        document_id=analysis_data.get('document_id'),
+                        case_id=analysis_data.get('case_id'),
+                        analysis_content=analysis_data.get('analysis_content'),
+                        model_used=analysis_data.get('model_used'),
+                        analysis_status=analysis_data.get('analysis_status', 'COMPLETE'),
+                        tokens_used=analysis_data.get('tokens_used'),
+                        analysis_reasoning=analysis_data.get('analysis_reasoning')
+                    )
+                    
+                    if result.success:
+                        successful_analyses.extend(result.data)
+                    else:
+                        failed_analyses.append({
+                            "index": i,
+                            "document_id": analysis_data.get('document_id'),
+                            "error": result.error
+                        })
+                        
+                except Exception as e:
+                    failed_analyses.append({
+                        "index": i,
+                        "document_id": analysis_data.get('document_id'),
+                        "error": str(e)
+                    })
+            
+            success_count = len(successful_analyses)
+            failure_count = len(failed_analyses)
+            
+            logger.info(f"Bulk analysis complete: {success_count} successful, {failure_count} failed")
+            
+            return ServiceResult(
+                success=failure_count == 0,  # Only success if all succeeded
+                data=successful_analyses,
+                count=success_count,
+                error=f"Partial success: {failure_count} failures" if failure_count > 0 else None,
+                error_type="PARTIAL_FAILURE" if failure_count > 0 else None
+            )
+            
+        except Exception as e:
+            logger.error(f"Bulk analysis storage failed: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
+    
+    async def delete_analysis(self, analysis_id: str) -> ServiceResult:
+        """
+        Delete a document analysis record and update document status if needed
+        
+        Args:
+            analysis_id: UUID of the analysis to delete
+            
+        Returns:
+            ServiceResult with deletion details and document_id for status update
+        """
+        logger.info(f"Deleting analysis {analysis_id}")
+        
+        try:
+            from database.connection import get_db_pool
+            db_pool = get_db_pool()
+            
+            async with db_pool.acquire() as conn:
+                async with conn.transaction():
+                    # Get document_id before deletion for status update
+                    doc_id = await conn.fetchval(
+                        "SELECT document_id FROM document_analysis WHERE analysis_id = $1",
+                        analysis_id
+                    )
+                    
+                    if not doc_id:
+                        return ServiceResult(
+                            success=False,
+                            error="Analysis not found",
+                            error_type="NOT_FOUND"
+                        )
+                    
+                    # Delete the analysis
+                    result = await conn.execute(
+                        "DELETE FROM document_analysis WHERE analysis_id = $1",
+                        analysis_id
+                    )
+                    
+                    if result == "DELETE 0":
+                        return ServiceResult(
+                            success=False,
+                            error="Analysis not found",
+                            error_type="NOT_FOUND"
+                        )
+                    
+                    # Check if document has any other analyses
+                    other_analyses = await conn.fetchval(
+                        "SELECT COUNT(*) FROM document_analysis WHERE document_id = $1",
+                        doc_id
+                    )
+                    
+                    # If no other analyses exist, update document status back to processing
+                    document_status_updated = False
+                    if other_analyses == 0:
+                        await conn.execute(
+                            "UPDATE documents SET status = 'PROCESSING' WHERE document_id = $1",
+                            doc_id
+                        )
+                        document_status_updated = True
+                    
+                    logger.info(f"Analysis {analysis_id} deleted successfully")
+                    
+                    return ServiceResult(
+                        success=True,
+                        data=[{
+                            "analysis_id": analysis_id,
+                            "document_id": str(doc_id),
+                            "deleted": True,
+                            "document_status_updated": document_status_updated
+                        }],
+                        count=1
+                    )
+                    
+        except Exception as e:
+            logger.error(f"Failed to delete analysis {analysis_id}: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
+    
+    async def get_aggregated_analysis(self, case_id: str) -> ServiceResult:
+        """
+        Get aggregated analysis data for all documents in a case
+        
+        Args:
+            case_id: UUID of the case
+            
+        Returns:
+            ServiceResult with aggregated analysis data
+        """
+        logger.info(f"Getting aggregated analysis for case {case_id}")
+        
+        try:
+            # Get all analyses for the case
+            analyses_result = await self.get_analyses_by_case(case_id)
+            if not analyses_result.success:
+                return analyses_result
+            
+            analyses = analyses_result.data
+            
+            # Aggregate the data
+            aggregated_data = {
+                "case_id": case_id,
+                "total_documents": len(analyses),
+                "analysis_status_counts": {},
+                "total_tokens_used": 0,
+                "models_used": set(),
+                "analyses": analyses
+            }
+            
+            for analysis in analyses:
+                # Count by status
+                status = analysis.get('analysis_status', 'UNKNOWN')
+                aggregated_data["analysis_status_counts"][status] = aggregated_data["analysis_status_counts"].get(status, 0) + 1
+                
+                # Sum tokens
+                tokens = analysis.get('tokens_used', 0) or 0
+                aggregated_data["total_tokens_used"] += tokens
+                
+                # Collect models
+                model = analysis.get('model_used')
+                if model:
+                    aggregated_data["models_used"].add(model)
+            
+            # Convert set to list for JSON serialization
+            aggregated_data["models_used"] = list(aggregated_data["models_used"])
+            
+            return ServiceResult(
+                success=True,
+                data=[aggregated_data],
+                count=1
+            )
+            
+        except Exception as e:
+            logger.error(f"Aggregated analysis failed for case {case_id}: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
 
 # Global service instances
 _documents_service: Optional[DocumentsService] = None

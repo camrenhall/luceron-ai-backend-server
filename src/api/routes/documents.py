@@ -235,7 +235,7 @@ async def update_document(
     """
     set_endpoint_context("document_update")
     start_time = time.time()
-    db_pool = get_db_pool()
+    documents_service = get_documents_service()
     
     logger.info(f"Updating document {document_id}")
     
@@ -248,61 +248,60 @@ async def update_document(
         )
     
     try:
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                # Verify document exists
-                doc_exists = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id = $1)", 
-                    document_id
+        # First check if document exists
+        doc_result = await documents_service.get_by_id(document_id)
+        if not doc_result.success or not doc_result.data:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Document {document_id} not found"
+            )
+        
+        # Filter out None values for the update
+        filtered_update_data = {k: v for k, v in update_data.items() if v is not None}
+        
+        if not filtered_update_data:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid fields provided for update"
+            )
+        
+        # Update document using service
+        result = await documents_service.update(document_id, filtered_update_data)
+        
+        if not result.success:
+            processing_time = int((time.time() - start_time) * 1000)
+            logger.error(f"Document update failed: {result.error}, processing_time={processing_time}ms")
+            
+            if result.error_type == "NOT_FOUND":
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document {document_id} not found"
                 )
-                if not doc_exists:
-                    raise HTTPException(
-                        status_code=404, 
-                        detail=f"Document {document_id} not found"
-                    )
-                
-                # Build dynamic update query
-                set_clauses = []
-                values = []
-                param_counter = 1
-                
-                for field, value in update_data.items():
-                    if value is not None:
-                        set_clauses.append(f"{field} = ${param_counter}")
-                        values.append(value)
-                        param_counter += 1
-                
-                if not set_clauses:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="No valid fields provided for update"
-                    )
-                
-                # Add document_id as final parameter
-                values.append(document_id)
-                
-                query = f"""
-                    UPDATE documents 
-                    SET {', '.join(set_clauses)}
-                    WHERE document_id = ${param_counter}
-                    RETURNING status
-                """
-                
-                updated_status = await conn.fetchval(query, *values)
-                
-                processing_time = int((time.time() - start_time) * 1000)
-                updated_fields = list(update_data.keys())
-                
-                logger.info(f"Document updated successfully: document_id={document_id}, "
-                           f"fields={updated_fields}, processing_time={processing_time}ms")
-                
-                return DocumentUpdateResponse(
-                    success=True,
-                    document_id=document_id,
-                    updated_fields=updated_fields,
-                    status=updated_status,
-                    updated_at=datetime.utcnow()
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid update request: {result.error}"
                 )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Document update failed: {result.error}"
+                )
+        
+        document_data = result.data[0] if result.data else {}
+        processing_time = int((time.time() - start_time) * 1000)
+        updated_fields = list(filtered_update_data.keys())
+        
+        logger.info(f"Document updated successfully: document_id={document_id}, "
+                   f"fields={updated_fields}, processing_time={processing_time}ms")
+        
+        return DocumentUpdateResponse(
+            success=True,
+            document_id=document_id,
+            updated_fields=updated_fields,
+            status=document_data.get('status', 'UNKNOWN'),
+            updated_at=datetime.utcnow()
+        )
                 
     except HTTPException:
         raise
@@ -328,76 +327,79 @@ async def lookup_documents_by_batch(
     of document lookups with intelligent filename matching.
     """
     start_time = time.time()
-    db_pool = get_db_pool()
+    documents_service = get_documents_service()
     
     logger.info(f"Starting batch lookup for batch_id: {request.batch_id}, "
                 f"files: {len(request.processed_files)}")
     
     try:
-        async with db_pool.acquire() as conn:
-            # Single optimized query to get all documents for the batch
-            batch_documents = await conn.fetch("""
-                SELECT document_id, original_file_name, case_id, status, created_at
-                FROM documents 
-                WHERE batch_id = $1
-                ORDER BY created_at ASC
-            """, request.batch_id)
-            
-            batch_docs_list = [dict(doc) for doc in batch_documents]
-            
-            logger.info(f"Found {len(batch_docs_list)} documents for batch {request.batch_id}")
-            
-            # Process each file and find matches
-            mappings = []
-            found_count = 0
-            
-            for processed_file in request.processed_files:
-                match = find_best_document_match(
-                    processed_file.original_filename_pattern,
-                    batch_docs_list
-                )
-                
-                if match:
-                    confidence = calculate_filename_similarity(
-                        processed_file.original_filename_pattern,
-                        match['original_file_name']
-                    )
-                    
-                    mapping = DocumentMapping(
-                        file_key=processed_file.file_key,
-                        document_id=str(match['document_id']),
-                        found=True,
-                        confidence_score=confidence
-                    )
-                    found_count += 1
-                    
-                    logger.debug(f"Matched file {processed_file.file_key} to document "
-                                f"{match['document_id']} (confidence: {confidence:.2f})")
-                else:
-                    mapping = DocumentMapping(
-                        file_key=processed_file.file_key,
-                        document_id=None,
-                        found=False,
-                        confidence_score=0.0
-                    )
-                    
-                    logger.debug(f"No match found for file {processed_file.file_key}")
-                
-                mappings.append(mapping)
-            
-            processing_time = int((time.time() - start_time) * 1000)
-            
-            logger.info(f"Batch lookup completed: {found_count}/{len(request.processed_files)} "
-                       f"matches found in {processing_time}ms")
-            
-            return DocumentLookupResponse(
-                success=True,
-                batch_id=request.batch_id,
-                total_requested=len(request.processed_files),
-                total_found=found_count,
-                mappings=mappings
+        # Get all documents for the batch using service
+        batch_result = await documents_service.get_documents_by_batch(request.batch_id)
+        
+        if not batch_result.success:
+            logger.error(f"Failed to get documents for batch {request.batch_id}: {batch_result.error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get batch documents: {batch_result.error}"
+            )
+        
+        batch_docs_list = batch_result.data or []
+        
+        logger.info(f"Found {len(batch_docs_list)} documents for batch {request.batch_id}")
+        
+        # Process each file and find matches
+        mappings = []
+        found_count = 0
+        
+        for processed_file in request.processed_files:
+            match = find_best_document_match(
+                processed_file.original_filename_pattern,
+                batch_docs_list
             )
             
+            if match:
+                confidence = calculate_filename_similarity(
+                    processed_file.original_filename_pattern,
+                    match['original_file_name']
+                )
+                
+                mapping = DocumentMapping(
+                    file_key=processed_file.file_key,
+                    document_id=str(match['document_id']),
+                    found=True,
+                    confidence_score=confidence
+                )
+                found_count += 1
+                
+                logger.debug(f"Matched file {processed_file.file_key} to document "
+                            f"{match['document_id']} (confidence: {confidence:.2f})")
+            else:
+                mapping = DocumentMapping(
+                    file_key=processed_file.file_key,
+                    document_id=None,
+                    found=False,
+                    confidence_score=0.0
+                )
+                
+                logger.debug(f"No match found for file {processed_file.file_key}")
+            
+            mappings.append(mapping)
+        
+        processing_time = int((time.time() - start_time) * 1000)
+        
+        logger.info(f"Batch lookup completed: {found_count}/{len(request.processed_files)} "
+                   f"matches found in {processing_time}ms")
+        
+        return DocumentLookupResponse(
+            success=True,
+            batch_id=request.batch_id,
+            total_requested=len(request.processed_files),
+            total_found=found_count,
+            mappings=mappings
+        )
+            
+    except HTTPException:
+        raise
     except Exception as e:
         processing_time = int((time.time() - start_time) * 1000)
         logger.error(f"Batch lookup failed for batch {request.batch_id}: {e}")
@@ -422,120 +424,128 @@ async def bulk_store_document_analysis(
     """
     set_endpoint_context("bulk_analysis_storage")
     start_time = time.time()
-    db_pool = get_db_pool()
+    document_analysis_service = get_document_analysis_service()
+    documents_service = get_documents_service()
+    cases_service = get_cases_service()
     
     logger.info(f"Processing bulk analysis: {len(request.analyses)} records")
     
     try:
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                inserted_count = 0
-                failed_records: List[AnalysisFailure] = []
+        inserted_count = 0
+        failed_records: List[AnalysisFailure] = []
+        
+        # Collect unique IDs for batch validation
+        document_ids = list(set([analysis.document_id for analysis in request.analyses]))
+        case_ids = list(set([analysis.case_id for analysis in request.analyses]))
+        
+        logger.debug(f"Validating {len(document_ids)} documents, {len(case_ids)} cases")
+        
+        # Validate documents exist
+        valid_document_ids = set()
+        for doc_id in document_ids:
+            doc_result = await documents_service.get_by_id(doc_id)
+            if doc_result.success and doc_result.data:
+                valid_document_ids.add(doc_id)
+        
+        # Validate cases exist
+        valid_case_ids = set()
+        for case_id in case_ids:
+            case_result = await cases_service.get_case_by_id(case_id)
+            if case_result.success and case_result.data:
+                valid_case_ids.add(case_id)
+        
+        logger.info(f"Validation complete: {len(valid_document_ids)}/{len(document_ids)} documents, "
+                   f"{len(valid_case_ids)}/{len(case_ids)} cases found")
+        
+        # Process each analysis record
+        for i, analysis in enumerate(request.analyses):
+            try:
+                # Validate document exists
+                if analysis.document_id not in valid_document_ids:
+                    logger.warning(f"Document not found: {analysis.document_id}")
+                    failed_records.append(AnalysisFailure(
+                        index=i,
+                        record_id=str(analysis.document_id),
+                        error=f"Document {analysis.document_id} not found",
+                        error_code="DOCUMENT_NOT_FOUND"
+                    ))
+                    continue
                 
-                # Collect unique IDs for batch validation
-                document_ids = [analysis.document_id for analysis in request.analyses]
-                case_ids = [analysis.case_id for analysis in request.analyses]
+                # Validate case exists
+                if analysis.case_id not in valid_case_ids:
+                    logger.warning(f"Case not found: {analysis.case_id}")
+                    failed_records.append(AnalysisFailure(
+                        index=i,
+                        record_id=str(analysis.case_id),
+                        error=f"Case {analysis.case_id} not found",
+                        error_code="CASE_NOT_FOUND"
+                    ))
+                    continue
                 
-                logger.debug(f"Validating {len(set(document_ids))} documents, {len(set(case_ids))} cases")
-                
-                # Batch validate document existence
-                existing_documents = await conn.fetch("""
-                    SELECT document_id 
-                    FROM documents 
-                    WHERE document_id = ANY($1)
-                """, document_ids)
-                
-                valid_document_ids = {doc['document_id'] for doc in existing_documents}
-                
-                # Batch validate case existence
-                existing_cases = await conn.fetch("""
-                    SELECT case_id 
-                    FROM cases 
-                    WHERE case_id = ANY($1)
-                """, case_ids)
-                
-                valid_case_ids = {case['case_id'] for case in existing_cases}
-                
-                logger.info(f"Validation complete: {len(valid_document_ids)}/{len(set(document_ids))} documents, "
-                           f"{len(valid_case_ids)}/{len(set(case_ids))} cases found")
-                
-                # Process each analysis record
-                for i, analysis in enumerate(request.analyses):
-                    try:
-                        # Validate document exists
-                        if analysis.document_id not in valid_document_ids:
-                            logger.warning(f"Document not found: {analysis.document_id}")
-                            failed_records.append(AnalysisFailure(
-                                index=i,
-                                record_id=str(analysis.document_id),
-                                error=f"Document {analysis.document_id} not found",
-                                error_code="DOCUMENT_NOT_FOUND"
-                            ))
-                            continue
-                        
-                        # Validate case exists
-                        if analysis.case_id not in valid_case_ids:
-                            logger.warning(f"Case not found: {analysis.case_id}")
-                            failed_records.append(AnalysisFailure(
-                                index=i,
-                                record_id=str(analysis.case_id),
-                                error=f"Case {analysis.case_id} not found",
-                                error_code="CASE_NOT_FOUND"
-                            ))
-                            continue
-                        
-                        # Insert analysis record
-                        analysis_id = await conn.fetchval("""
-                            INSERT INTO document_analysis 
-                            (document_id, case_id, analysis_content, 
-                             analysis_status, model_used, tokens_used, analyzed_at, analysis_reasoning, context_summary_created)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                            RETURNING analysis_id
-                        """, 
-                        analysis.document_id, analysis.case_id,
-                        analysis.analysis_content, analysis.analysis_status, 
-                        analysis.model_used, analysis.tokens_used, analysis.analyzed_at, analysis.analysis_reasoning, analysis.context_summary_created)
-                        
-                        # Update document status to completed
-                        await conn.execute("""
-                            UPDATE documents 
-                            SET status = 'COMPLETED' 
-                            WHERE document_id = $1
-                        """, analysis.document_id)
-                        
-                        inserted_count += 1
-                        
-                    except Exception as record_error:
-                        logger.error(f"Failed to store analysis record {i}: {record_error}")
-                        failed_records.append(AnalysisFailure(
-                            index=i,
-                            record_id=str(analysis.document_id),
-                            error=str(record_error),
-                            error_code="STORAGE_ERROR"
-                        ))
-                        continue
-                
-                processing_time = int((time.time() - start_time) * 1000)
-                
-                # Determine overall success
-                success = len(failed_records) == 0
-                failed_count = len(failed_records)
-                
-                logger.info(f"Bulk analysis complete: {inserted_count} inserted, "
-                           f"{failed_count} failed ({processing_time}ms)")
-                
-                if failed_records:
-                    error_codes = [f.error_code for f in failed_records]
-                    logger.warning(f"Failed records: {error_codes}")
-                
-                return BulkAnalysisResponse(
-                    success=success,
-                    total_requested=len(request.analyses),
-                    inserted_count=inserted_count,
-                    failed_count=failed_count,
-                    failed_records=failed_records if failed_records else None,
-                    processing_time_ms=processing_time
+                # Create analysis using service
+                analysis_result = await document_analysis_service.create_analysis(
+                    document_id=analysis.document_id,
+                    case_id=analysis.case_id,
+                    analysis_content=analysis.analysis_content,
+                    model_used=analysis.model_used,
+                    tokens_used=analysis.tokens_used,
+                    analysis_reasoning=analysis.analysis_reasoning,
+                    analysis_status=analysis.analysis_status
                 )
+                
+                if not analysis_result.success:
+                    logger.error(f"Failed to create analysis for document {analysis.document_id}: {analysis_result.error}")
+                    failed_records.append(AnalysisFailure(
+                        index=i,
+                        record_id=str(analysis.document_id),
+                        error=analysis_result.error,
+                        error_code="STORAGE_ERROR"
+                    ))
+                    continue
+                
+                # Update document status to completed
+                update_result = await documents_service.update_document_status(
+                    analysis.document_id, 
+                    'COMPLETED'
+                )
+                
+                if not update_result.success:
+                    logger.warning(f"Failed to update document status for {analysis.document_id}: {update_result.error}")
+                    # Don't fail the entire analysis creation for this
+                
+                inserted_count += 1
+                
+            except Exception as record_error:
+                logger.error(f"Failed to store analysis record {i}: {record_error}")
+                failed_records.append(AnalysisFailure(
+                    index=i,
+                    record_id=str(analysis.document_id),
+                    error=str(record_error),
+                    error_code="STORAGE_ERROR"
+                ))
+                continue
+        
+        processing_time = int((time.time() - start_time) * 1000)
+        
+        # Determine overall success
+        success = len(failed_records) == 0
+        failed_count = len(failed_records)
+        
+        logger.info(f"Bulk analysis complete: {inserted_count} inserted, "
+                   f"{failed_count} failed ({processing_time}ms)")
+        
+        if failed_records:
+            error_codes = [f.error_code for f in failed_records]
+            logger.warning(f"Failed records: {error_codes}")
+        
+        return BulkAnalysisResponse(
+            success=success,
+            total_requested=len(request.analyses),
+            inserted_count=inserted_count,
+            failed_count=failed_count,
+            failed_records=failed_records if failed_records else None,
+            processing_time_ms=processing_time
+        )
                 
     except Exception as e:
         processing_time = int((time.time() - start_time) * 1000)
@@ -555,59 +565,62 @@ async def store_document_analysis(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Store document analysis results"""
-    db_pool = get_db_pool()
+    document_analysis_service = get_document_analysis_service()
+    documents_service = get_documents_service()
+    cases_service = get_cases_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Verify document exists
-            doc_exists = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM documents WHERE document_id = $1)", 
-                document_id
+        # Verify document exists
+        doc_result = await documents_service.get_by_id(document_id)
+        if not doc_result.success or not doc_result.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Verify case exists
+        case_result = await cases_service.get_case_by_id(request.case_id)
+        if not case_result.success or not case_result.data:
+            raise HTTPException(status_code=404, detail="Case not found")
+        
+        # Create analysis using service
+        analysis_result = await document_analysis_service.create_analysis(
+            document_id=document_id,
+            case_id=request.case_id,
+            analysis_content=request.analysis_content,
+            model_used=request.model_used,
+            tokens_used=request.tokens_used,
+            analysis_reasoning=request.analysis_reasoning,
+            analysis_status=request.analysis_status
+        )
+        
+        if not analysis_result.success:
+            logger.error(f"Failed to create analysis: {analysis_result.error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Analysis creation failed: {analysis_result.error}"
             )
-            if not doc_exists:
-                raise HTTPException(status_code=404, detail="Document not found")
-            
-            # Verify case exists
-            case_exists = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
-                request.case_id
-            )
-            if not case_exists:
-                raise HTTPException(status_code=404, detail="Case not found")
-            
-            # Insert analysis result
-            analysis_id = await conn.fetchval("""
-                INSERT INTO document_analysis 
-                (document_id, case_id, analysis_content, 
-                 analysis_status, model_used, tokens_used, analyzed_at, analysis_reasoning, context_summary_created)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                RETURNING analysis_id
-            """, 
-            document_id, request.case_id,
-            request.analysis_content, request.analysis_status, request.model_used,
-            request.tokens_used, datetime.utcnow(), request.analysis_reasoning, request.context_summary_created)
-            
-            # Update document status to completed
-            await conn.execute(
-                "UPDATE documents SET status = 'COMPLETED' WHERE document_id = $1",
-                document_id
-            )
-            
-            logger.info(f"Stored analysis result {analysis_id} for document {document_id}")
-            
-            return AnalysisResultResponse(
-                analysis_id=str(analysis_id),
-                document_id=document_id,
-                case_id=request.case_id,
-                status="stored",
-                analyzed_at=datetime.utcnow().isoformat()
-            )
+        
+        analysis_data = analysis_result.data[0]
+        
+        # Update document status to completed
+        update_result = await documents_service.update_document_status(document_id, 'COMPLETED')
+        if not update_result.success:
+            logger.warning(f"Failed to update document status: {update_result.error}")
+            # Don't fail the entire operation for this
+        
+        logger.info(f"Stored analysis result {analysis_data['analysis_id']} for document {document_id}")
+        
+        return AnalysisResultResponse(
+            analysis_id=str(analysis_data['analysis_id']),
+            document_id=document_id,
+            case_id=request.case_id,
+            status="stored",
+            analyzed_at=datetime.utcnow().isoformat()
+        )
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to store analysis result: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.get("/{document_id}/analysis")
 async def get_document_analysis(
@@ -615,36 +628,38 @@ async def get_document_analysis(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Get analysis results for a document"""
-    db_pool = get_db_pool()
+    document_analysis_service = get_document_analysis_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            analysis_row = await conn.fetchrow("""
-                SELECT analysis_id, document_id, case_id, analysis_content,
-                       analysis_status, model_used, tokens_used, analyzed_at, created_at, analysis_reasoning, context_summary_created
-                FROM document_analysis 
-                WHERE document_id = $1
-                ORDER BY analyzed_at DESC
-                LIMIT 1
-            """, document_id)
-            
-            if not analysis_row:
-                raise HTTPException(status_code=404, detail="Analysis not found for document")
-            
-            result = dict(analysis_row)
-            
-            # Convert timestamps to ISO format
-            for field in ['analyzed_at', 'created_at']:
-                if result[field]:
-                    result[field] = result[field].isoformat()
-            
-            return result
+        # Get all analyses for the document
+        result = await document_analysis_service.get_analyses_by_document(document_id)
+        
+        if not result.success:
+            logger.error(f"Failed to get analyses for document {document_id}: {result.error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get analyses: {result.error}"
+            )
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Analysis not found for document")
+        
+        # Get the most recent analysis (first one since we order by analyzed_at DESC in service)
+        analysis = result.data[0]
+        
+        # Convert timestamps to ISO format
+        for field in ['analyzed_at', 'created_at']:
+            if analysis.get(field):
+                if hasattr(analysis[field], 'isoformat'):
+                    analysis[field] = analysis[field].isoformat()
+        
+        return analysis
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get analysis result: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 
 @router.get("/{document_id}")
@@ -653,35 +668,39 @@ async def get_document(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Get document metadata by document ID"""
-    db_pool = get_db_pool()
+    documents_service = get_documents_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            doc_row = await conn.fetchrow("""
-                SELECT document_id, case_id, original_file_name, original_file_size, original_file_type,
-                       original_s3_location, original_s3_key, status, created_at,
-                       processed_file_name, processed_file_size, processed_s3_location, processed_s3_key, batch_id
-                FROM documents 
-                WHERE document_id = $1
-            """, document_id)
-            
-            if not doc_row:
+        result = await documents_service.get_by_id(document_id)
+        
+        if not result.success:
+            logger.error(f"Failed to get document {document_id}: {result.error}")
+            if result.error_type == "NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Document not found")
-            
-            result = dict(doc_row)
-            
-            # Convert timestamps to ISO format
-            for field in ['created_at']:
-                if result[field]:
-                    result[field] = result[field].isoformat()
-            
-            return result
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to get document: {result.error}"
+                )
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        document = result.data[0]
+        
+        # Convert timestamps to ISO format
+        for field in ['created_at']:
+            if document.get(field):
+                if hasattr(document[field], 'isoformat'):
+                    document[field] = document[field].isoformat()
+        
+        return document
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get document: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 
 # Enhanced Document Analysis Endpoints
@@ -699,83 +718,67 @@ async def get_all_analyses_by_case(
     including the full analysis_content JSON. This replaces the need for a separate
     aggregated table as data can be aggregated on-demand.
     """
-    db_pool = get_db_pool()
+    document_analysis_service = get_document_analysis_service()
+    cases_service = get_cases_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Validate case exists
-            case_exists = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
-                case_id
+        # Validate case exists
+        case_result = await cases_service.get_case_by_id(case_id)
+        if not case_result.success or not case_result.data:
+            raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
+        
+        # Get all analyses for the case
+        analyses_result = await document_analysis_service.get_analyses_by_case(case_id)
+        
+        if not analyses_result.success:
+            logger.error(f"Failed to get analyses for case {case_id}: {analyses_result.error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get analyses: {analyses_result.error}"
             )
-            if not case_exists:
-                raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
-            
-            # Get all analyses for the case
-            if include_content:
-                query = """
-                    SELECT da.analysis_id, da.document_id, da.case_id, 
-                           da.analysis_content, da.analysis_status, da.model_used,
-                           da.tokens_used, da.analyzed_at, da.created_at, da.analysis_reasoning,
-                           da.context_summary_created, d.original_file_name
-                    FROM document_analysis da
-                    JOIN documents d ON da.document_id = d.document_id
-                    WHERE da.case_id = $1
-                    ORDER BY da.analyzed_at DESC
-                """
-            else:
-                query = """
-                    SELECT da.analysis_id, da.document_id, da.case_id,
-                           da.analysis_status, da.model_used,
-                           da.tokens_used, da.analyzed_at, da.created_at,
-                           da.context_summary_created, d.original_file_name
-                    FROM document_analysis da
-                    JOIN documents d ON da.document_id = d.document_id
-                    WHERE da.case_id = $1
-                    ORDER BY da.analyzed_at DESC
-                """
-            
-            rows = await conn.fetch(query, case_id)
-            
-            # Calculate totals
-            total_tokens = await conn.fetchval("""
-                SELECT SUM(tokens_used) 
-                FROM document_analysis 
-                WHERE case_id = $1 AND tokens_used IS NOT NULL
-            """, case_id)
-            
-            analyses = []
-            for row in rows:
-                analysis_data = DocumentAnalysisData(
-                    analysis_id=row['analysis_id'],
-                    document_id=row['document_id'],
-                    case_id=row['case_id'],
-                    analysis_content=row.get('analysis_content', '{}') if include_content else '{}',
-                    analysis_status=row['analysis_status'],
-                    model_used=row['model_used'],
-                    tokens_used=row['tokens_used'],
-                    analyzed_at=row['analyzed_at'],
-                    created_at=row['created_at'],
-                    analysis_reasoning=row.get('analysis_reasoning'),
-                    context_summary_created=row.get('context_summary_created', False)
-                )
-                analyses.append(analysis_data)
-            
-            logger.info(f"Retrieved {len(analyses)} analyses for case {case_id}")
-            
-            return DocumentAnalysisByCaseResponse(
-                case_id=case_id,
-                total_analyses=len(analyses),
-                total_tokens_used=int(total_tokens) if total_tokens else None,
-                analyses=analyses,
-                aggregated_content=None  # Can be populated with custom aggregation logic if needed
+        
+        analyses_data = analyses_result.data or []
+        
+        # Get aggregated analysis data which includes total tokens
+        aggregated_result = await document_analysis_service.get_aggregated_analysis(case_id)
+        total_tokens = None
+        if aggregated_result.success and aggregated_result.data:
+            total_tokens = aggregated_result.data[0].get('total_tokens_used')
+        
+        analyses = []
+        for analysis_data in analyses_data:
+            # Note: The service doesn't include original_file_name, so we'll need to get documents too
+            # For now, we'll work with what we have from the service
+            analysis = DocumentAnalysisData(
+                analysis_id=analysis_data['analysis_id'],
+                document_id=analysis_data['document_id'],
+                case_id=analysis_data['case_id'],
+                analysis_content=analysis_data.get('analysis_content', '{}') if include_content else '{}',
+                analysis_status=analysis_data['analysis_status'],
+                model_used=analysis_data['model_used'],
+                tokens_used=analysis_data['tokens_used'],
+                analyzed_at=analysis_data['analyzed_at'],
+                created_at=analysis_data['created_at'],
+                analysis_reasoning=analysis_data.get('analysis_reasoning'),
+                context_summary_created=analysis_data.get('context_summary_created', False)
             )
+            analyses.append(analysis)
+        
+        logger.info(f"Retrieved {len(analyses)} analyses for case {case_id}")
+        
+        return DocumentAnalysisByCaseResponse(
+            case_id=case_id,
+            total_analyses=len(analyses),
+            total_tokens_used=int(total_tokens) if total_tokens else None,
+            analyses=analyses,
+            aggregated_content=None  # Can be populated with custom aggregation logic if needed
+        )
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get analyses for case: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 
 @router.get("/analysis/case/{case_id}/aggregate", response_model=DocumentAnalysisAggregatedSummary)
@@ -784,81 +787,86 @@ async def get_aggregated_analysis_summary(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """
-    Get aggregated analysis summary for a case using SQL aggregation.
+    Get aggregated analysis summary for a case using service layer aggregation.
     
     This endpoint provides a summary of all analyses for a case, computed
-    dynamically via SQL aggregation functions rather than storing pre-aggregated data.
+    dynamically via the document analysis service.
     """
-    db_pool = get_db_pool()
+    document_analysis_service = get_document_analysis_service()
+    cases_service = get_cases_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Validate case exists
-            case_exists = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM cases WHERE case_id = $1)", 
-                case_id
+        # Validate case exists
+        case_result = await cases_service.get_case_by_id(case_id)
+        if not case_result.success or not case_result.data:
+            raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
+        
+        # Get aggregated analysis data
+        aggregated_result = await document_analysis_service.get_aggregated_analysis(case_id)
+        
+        if not aggregated_result.success:
+            logger.error(f"Failed to get aggregated analysis for case {case_id}: {aggregated_result.error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get aggregated analysis: {aggregated_result.error}"
             )
-            if not case_exists:
-                raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
-            
-            # Get aggregated statistics
-            stats = await conn.fetchrow("""
-                SELECT 
-                    COUNT(*) as total_documents,
-                    SUM(tokens_used) as total_tokens,
-                    MIN(analyzed_at) as earliest_analysis,
-                    MAX(analyzed_at) as latest_analysis,
-                    array_agg(DISTINCT model_used) as models_used
-                FROM document_analysis
-                WHERE case_id = $1
-            """, case_id)
-            
-            # Get status breakdown
-            status_breakdown_rows = await conn.fetch("""
-                SELECT analysis_status, COUNT(*) as count
-                FROM document_analysis
-                WHERE case_id = $1
-                GROUP BY analysis_status
-            """, case_id)
-            
-            status_breakdown = {row['analysis_status']: row['count'] for row in status_breakdown_rows}
-            
-            # Optionally aggregate insights from analysis_content
-            # This is where you could parse and combine the JSON content
-            aggregated_insights = None
-            if stats['total_documents'] > 0:
-                # Example: Get all analysis contents and aggregate them
-                contents = await conn.fetch("""
-                    SELECT analysis_content
-                    FROM document_analysis
-                    WHERE case_id = $1 AND analysis_status = 'COMPLETED'
-                """, case_id)
-                
-                # Here you could implement custom logic to merge/aggregate the JSON contents
-                # For now, we'll just count the documents
-                aggregated_insights = {
-                    "total_completed_analyses": len(contents),
-                    "processing_note": "Individual analyses can be merged here based on specific business logic"
-                }
-            
-            logger.info(f"Generated aggregated summary for case {case_id}: {stats['total_documents']} documents")
-            
+        
+        if not aggregated_result.data:
+            # No analyses for this case
             return DocumentAnalysisAggregatedSummary(
                 case_id=case_id,
-                total_documents=stats['total_documents'] or 0,
-                total_tokens=int(stats['total_tokens']) if stats['total_tokens'] else None,
-                models_used=stats['models_used'] or [],
-                status_breakdown=status_breakdown,
-                earliest_analysis=stats['earliest_analysis'],
-                latest_analysis=stats['latest_analysis'],
-                aggregated_insights=aggregated_insights
+                total_documents=0,
+                total_tokens=None,
+                models_used=[],
+                status_breakdown={},
+                earliest_analysis=None,
+                latest_analysis=None,
+                aggregated_insights=None
             )
+        
+        aggregated_data = aggregated_result.data[0]
+        
+        # Get all analyses to compute additional stats that service doesn't provide
+        analyses_result = await document_analysis_service.get_analyses_by_case(case_id)
+        
+        earliest_analysis = None
+        latest_analysis = None
+        if analyses_result.success and analyses_result.data:
+            analyses = analyses_result.data
+            if analyses:
+                # Find earliest and latest
+                dates = [a.get('analyzed_at') for a in analyses if a.get('analyzed_at')]
+                if dates:
+                    earliest_analysis = min(dates)
+                    latest_analysis = max(dates)
+        
+        # Prepare aggregated insights
+        aggregated_insights = None
+        if aggregated_data.get('total_documents', 0) > 0:
+            completed_count = aggregated_data.get('analysis_status_counts', {}).get('COMPLETED', 0)
+            aggregated_insights = {
+                "total_completed_analyses": completed_count,
+                "processing_note": "Individual analyses can be merged here based on specific business logic"
+            }
+        
+        logger.info(f"Generated aggregated summary for case {case_id}: {aggregated_data.get('total_documents', 0)} documents")
+        
+        return DocumentAnalysisAggregatedSummary(
+            case_id=case_id,
+            total_documents=aggregated_data.get('total_documents', 0),
+            total_tokens=aggregated_data.get('total_tokens_used'),
+            models_used=aggregated_data.get('models_used', []),
+            status_breakdown=aggregated_data.get('analysis_status_counts', {}),
+            earliest_analysis=earliest_analysis,
+            latest_analysis=latest_analysis,
+            aggregated_insights=aggregated_insights
+        )
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get aggregated analysis summary: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 
 @router.put("/analysis/{analysis_id}", response_model=DocumentAnalysisUpdateResponse)
@@ -873,7 +881,7 @@ async def update_document_analysis(
     This endpoint allows updating analysis content, status, model, or token count
     for reprocessing or correction purposes.
     """
-    db_pool = get_db_pool()
+    document_analysis_service = get_document_analysis_service()
     
     # Validate at least one field is provided
     update_data = request.dict(exclude_unset=True)
@@ -886,51 +894,44 @@ async def update_document_analysis(
     logger.info(f"Updating analysis {analysis_id} with fields: {list(update_data.keys())}")
     
     try:
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                # Verify analysis exists
-                exists = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM document_analysis WHERE analysis_id = $1)",
-                    analysis_id
+        # First check if analysis exists
+        analysis_result = await document_analysis_service.get_by_id(analysis_id)
+        if not analysis_result.success or not analysis_result.data:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        # Update the analysis using service
+        result = await document_analysis_service.update(analysis_id, update_data)
+        
+        if not result.success:
+            logger.error(f"Failed to update analysis {analysis_id}: {result.error}")
+            
+            if result.error_type == "NOT_FOUND":
+                raise HTTPException(status_code=404, detail="Analysis not found")
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid update request: {result.error}"
                 )
-                if not exists:
-                    raise HTTPException(status_code=404, detail="Analysis not found")
-                
-                # Build dynamic update query
-                set_clauses = []
-                values = []
-                param_count = 1
-                
-                for field, value in update_data.items():
-                    set_clauses.append(f"{field} = ${param_count}")
-                    values.append(value)
-                    param_count += 1
-                
-                # Add analysis_id as the last parameter
-                values.append(analysis_id)
-                
-                query = f"""
-                    UPDATE document_analysis 
-                    SET {', '.join(set_clauses)}
-                    WHERE analysis_id = ${param_count}
-                """
-                
-                await conn.execute(query, *values)
-                
-                logger.info(f"Analysis {analysis_id} updated successfully")
-                
-                return DocumentAnalysisUpdateResponse(
-                    success=True,
-                    analysis_id=analysis_id,
-                    updated_fields=list(update_data.keys()),
-                    updated_at=datetime.utcnow()
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Analysis update failed: {result.error}"
                 )
+        
+        logger.info(f"Analysis {analysis_id} updated successfully")
+        
+        return DocumentAnalysisUpdateResponse(
+            success=True,
+            analysis_id=analysis_id,
+            updated_fields=list(update_data.keys()),
+            updated_at=datetime.utcnow()
+        )
                 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to update analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 
 @router.delete("/analysis/{analysis_id}")
@@ -943,49 +944,35 @@ async def delete_document_analysis(
     
     This endpoint allows deletion of analysis records for data management purposes.
     """
-    db_pool = get_db_pool()
+    document_analysis_service = get_document_analysis_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                # Get document_id before deletion for status update
-                doc_id = await conn.fetchval(
-                    "SELECT document_id FROM document_analysis WHERE analysis_id = $1",
-                    analysis_id
+        # Delete the analysis using service
+        result = await document_analysis_service.delete_analysis(analysis_id)
+        
+        if not result.success:
+            logger.error(f"Failed to delete analysis {analysis_id}: {result.error}")
+            
+            if result.error_type == "NOT_FOUND":
+                raise HTTPException(status_code=404, detail="Analysis not found")
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Analysis deletion failed: {result.error}"
                 )
-                
-                if not doc_id:
-                    raise HTTPException(status_code=404, detail="Analysis not found")
-                
-                # Delete the analysis
-                await conn.execute(
-                    "DELETE FROM document_analysis WHERE analysis_id = $1",
-                    analysis_id
-                )
-                
-                # Check if document has any other analyses
-                other_analyses = await conn.fetchval(
-                    "SELECT COUNT(*) FROM document_analysis WHERE document_id = $1",
-                    doc_id
-                )
-                
-                # If no other analyses exist, update document status back to processing
-                if other_analyses == 0:
-                    await conn.execute(
-                        "UPDATE documents SET status = 'PROCESSING' WHERE document_id = $1",
-                        doc_id
-                    )
-                
-                logger.info(f"Analysis {analysis_id} deleted successfully")
-                
-                return {
-                    "success": True,
-                    "analysis_id": analysis_id,
-                    "message": "Analysis deleted successfully"
-                }
+        
+        deletion_data = result.data[0] if result.data else {}
+        logger.info(f"Analysis {analysis_id} deleted successfully")
+        
+        return {
+            "success": True,
+            "analysis_id": analysis_id,
+            "message": "Analysis deleted successfully",
+            "document_status_updated": deletion_data.get("document_status_updated", False)
+        }
                 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
