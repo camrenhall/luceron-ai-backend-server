@@ -28,6 +28,7 @@ async def init_database():
     
     logger.info("Database initialized successfully")
 
+
 async def close_database():
     """Close database connection pool"""
     global db_pool
