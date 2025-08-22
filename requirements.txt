@@ -8,3 +8,4 @@ svix
 openai
 PyJWT
 cryptography
+python-multipart
