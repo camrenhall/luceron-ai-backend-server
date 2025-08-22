@@ -46,10 +46,15 @@ SERVICE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "description": "AWS Lambda document processing pipeline"
     },
     "camren_master": {
-        "endpoints": ["*"],  # Full access to all endpoints
+        "endpoints": [
+            "*",  # Full access to all endpoints
+            "/emergency/suspend",
+            "/emergency/resume", 
+            "/emergency/status"
+        ],
         "resources": ["*"],  # Full access to all resources
         "operations": ["READ", "INSERT", "UPDATE", "DELETE"],  # All operations
-        "description": "Master access - full system permissions"
+        "description": "Master access - full system permissions including emergency kill-switch"
     }
 }
 

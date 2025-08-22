@@ -195,7 +195,7 @@ X-API-Key: {API_KEY}
 - `POST /oauth2/token` - Exchange service JWT for access token
 - **Grant Type**: `client_credentials`
 - **Authentication**: JWT bearer assertion (RSA-signed service JWT)
-- **Returns**: Access token valid for 60 minutes
+- **Returns**: Access token valid for 24 hours
 
 ##### OAuth2 Discovery
 - `GET /oauth2/.well-known/openid_configuration` - OpenID Connect discovery
@@ -1012,7 +1012,7 @@ Alert configuration:
    - Standards-compliant OAuth2 Client Credentials flow
    - RSA 2048-bit cryptographic service identity
    - JWT bearer assertions signed with private keys
-   - Short-lived access tokens (60 minutes)
+   - Access tokens (24 hours)
    - Service-specific permissions and scopes
    - Service key store with public key verification
 
@@ -1369,7 +1369,7 @@ For questions or issues related to this component:
 - ✅ **Enterprise Security**: Standards-compliant OAuth2 Client Credentials flow with RSA 2048-bit cryptographic authentication
 - ✅ **Service Identity Management**: Cryptographic service provisioning with unique key pairs per agent
 - ✅ **Permission Control**: Role-based access control with endpoint/resource/operation granularity
-- ✅ **Token Management**: 60-minute access tokens with automatic caching and refresh
+- ✅ **Token Management**: 24-hour access tokens with automatic caching and refresh
 - ✅ **Integration Ready**: Complete client SDK and integration guides for service onboarding
 - ✅ **Security Compliance**: JWT bearer assertions, signature verification, and service validation
 - ✅ **Production Deployment**: Service key store, OAuth2 endpoints, and provisioning tools ready

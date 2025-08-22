@@ -49,9 +49,9 @@ async def oauth2_token(
     - client_assertion: Service JWT signed with private key
     
     Returns:
-    - access_token: 60-minute JWT for API access
+    - access_token: 24-hour JWT for API access
     - token_type: "Bearer"
-    - expires_in: 3600 (seconds)
+    - expires_in: 86400 (seconds)
     - scope: Agent role scope
     """
     
@@ -106,7 +106,7 @@ async def oauth2_token(
         token_response = OAuth2TokenResponse(
             access_token=access_token,
             token_type="Bearer",
-            expires_in=3600,  # 60 minutes in seconds
+            expires_in=86400,  # 24 hours in seconds
             scope=f"agent:{service_identity.agent_role}"
         )
         
