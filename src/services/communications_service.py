@@ -284,6 +284,212 @@ class CommunicationsService(BaseService):
     async def get_failed_communications(self, limit: int = 100) -> ServiceResult:
         """Get communications with failed delivery status"""
         return await self.get_by_field("status", "failed", limit)
+    
+    async def handle_webhook_update(self, resend_id: str, event_data: Dict[str, Any]) -> ServiceResult:
+        """
+        Handle webhook updates from email service (e.g., Resend)
+        
+        Args:
+            resend_id: The external email service ID
+            event_data: Webhook event data containing status updates
+            
+        Returns:
+            ServiceResult indicating success/failure of update
+        """
+        logger.info(f"Handling webhook update for resend_id: {resend_id}")
+        
+        try:
+            # Find communication by resend_id
+            communications_result = await self.read(
+                filters={"resend_id": resend_id},
+                limit=1
+            )
+            
+            if not communications_result.success or communications_result.count == 0:
+                logger.warning(f"No communication found for resend_id: {resend_id}")
+                return ServiceResult(
+                    success=True,  # Return success for idempotency
+                    data=[],
+                    count=0,
+                    error=f"Communication not found for resend_id: {resend_id}"
+                )
+            
+            communication = communications_result.data[0]
+            communication_id = communication['communication_id']
+            
+            # Extract event type and update data
+            event_type = event_data.get('type', '')
+            updates = {}
+            
+            if event_type == 'email.opened':
+                updates['status'] = 'opened'
+                updates['opened_at'] = event_data.get('created_at', event_data.get('timestamp'))
+            elif event_type == 'email.delivered':
+                updates['status'] = 'delivered'
+            elif event_type in ['email.failed', 'email.bounced']:
+                updates['status'] = 'failed'
+            else:
+                logger.warning(f"Unknown webhook event type: {event_type}")
+                return ServiceResult(
+                    success=True,  # Return success for unknown events
+                    data=[communication],
+                    count=1,
+                    error=f"Unknown event type: {event_type}"
+                )
+            
+            # Update the communication
+            result = await self.update(communication_id, updates)
+            
+            if result.success:
+                logger.info(f"Successfully updated communication {communication_id} from webhook")
+            else:
+                logger.error(f"Failed to update communication {communication_id}: {result.error}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Webhook handler failed for resend_id {resend_id}: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
+    
+    async def update_communication_status_with_timestamp(
+        self, 
+        communication_id: str, 
+        status: str, 
+        opened_at: Optional[str] = None
+    ) -> ServiceResult:
+        """
+        Update communication status with optional opened timestamp
+        
+        Args:
+            communication_id: UUID of the communication
+            status: New status value
+            opened_at: Optional timestamp for when email was opened
+            
+        Returns:
+            ServiceResult with updated communication
+        """
+        updates = {"status": status}
+        if opened_at:
+            updates["opened_at"] = opened_at
+        
+        logger.info(f"Updating communication {communication_id} status to {status}")
+        return await self.update(communication_id, updates)
+    
+    async def update_communication_status(
+        self,
+        resend_id: str,
+        status: str,
+        opened_at: Optional[datetime] = None
+    ) -> ServiceResult:
+        """
+        Update communication status by resend_id (for webhook handling)
+        
+        Args:
+            resend_id: Resend email ID
+            status: New status value
+            opened_at: Optional timestamp for when email was opened
+            
+        Returns:
+            ServiceResult with updated communication
+        """
+        try:
+            # First find the communication by resend_id
+            find_result = await self.read(
+                filters={"resend_id": resend_id},
+                limit=1
+            )
+            
+            if not find_result.success or not find_result.data:
+                return ServiceResult(
+                    success=False,
+                    error=f"Communication with resend_id {resend_id} not found",
+                    error_type="RESOURCE_NOT_FOUND"
+                )
+            
+            communication = find_result.data[0]
+            communication_id = communication['communication_id']
+            
+            # Update the communication
+            updates = {"status": status}
+            if opened_at:
+                updates["opened_at"] = opened_at
+            
+            logger.info(f"Updating communication {communication_id} (resend_id: {resend_id}) status to {status}")
+            return await self.update(communication_id, updates)
+            
+        except Exception as e:
+            logger.error(f"Failed to update communication status by resend_id {resend_id}: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
+    
+    async def delete_communication(self, communication_id: str) -> ServiceResult:
+        """
+        Delete a communication record
+        
+        Note: This bypasses the Agent Gateway as DELETE operations are not supported
+        in the MVP spec, but are needed for API completeness.
+        
+        Args:
+            communication_id: UUID of the communication to delete
+            
+        Returns:
+            ServiceResult indicating success/failure with deleted communication data
+        """
+        try:
+            from database.connection import get_db_pool
+            db_pool = get_db_pool()
+            
+            async with db_pool.acquire() as conn:
+                # First get the communication to return its data
+                existing_comm = await conn.fetchrow(
+                    "SELECT communication_id, case_id FROM client_communications WHERE communication_id = $1",
+                    communication_id
+                )
+                
+                if not existing_comm:
+                    return ServiceResult(
+                        success=False,
+                        error=f"Communication with ID {communication_id} not found",
+                        error_type="RESOURCE_NOT_FOUND"
+                    )
+                
+                # Delete the communication
+                result = await conn.execute(
+                    "DELETE FROM client_communications WHERE communication_id = $1",
+                    communication_id
+                )
+                
+                if result == "DELETE 0":
+                    return ServiceResult(
+                        success=False,
+                        error=f"Communication with ID {communication_id} not found",
+                        error_type="RESOURCE_NOT_FOUND"
+                    )
+                
+                logger.info(f"Successfully deleted communication {communication_id}")
+                return ServiceResult(
+                    success=True,
+                    data=[{
+                        "communication_id": existing_comm['communication_id'],
+                        "case_id": str(existing_comm['case_id'])
+                    }],
+                    count=1
+                )
+                
+        except Exception as e:
+            logger.error(f"Failed to delete communication {communication_id}: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
 
 # Global service instance
 _communications_service: Optional[CommunicationsService] = None

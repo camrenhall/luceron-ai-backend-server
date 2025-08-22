@@ -88,41 +88,46 @@ async def get_communication(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Get communication by ID"""
-    db_pool = get_db_pool()
+    communications_service = get_communications_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            communication = await conn.fetchrow("""
-                SELECT communication_id, case_id, channel, direction, status, sender, recipient,
-                       subject, message_content, created_at, sent_at, opened_at, resend_id
-                FROM client_communications 
-                WHERE communication_id = $1
-            """, communication_id)
-            
-            if not communication:
+        result = await communications_service.get_communication_by_id(communication_id)
+        
+        if not result.success:
+            if result.error_type == "RESOURCE_NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Communication not found")
-            
-            return ClientCommunicationResponse(
-                communication_id=communication['communication_id'],
-                case_id=communication['case_id'],
-                channel=CommunicationChannel(communication['channel']),
-                direction=CommunicationDirection(communication['direction']),
-                status=DeliveryStatus(communication['status']),
-                sender=communication['sender'],
-                recipient=communication['recipient'],
-                subject=communication['subject'],
-                message_content=communication['message_content'],
-                created_at=communication['created_at'],
-                sent_at=communication['sent_at'],
-                opened_at=communication['opened_at'],
-                resend_id=communication['resend_id']
-            )
-            
+            elif result.error_type == "UNAUTHORIZED_OPERATION":
+                raise HTTPException(status_code=403, detail=result.error)
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Communication not found")
+        
+        communication_data = result.data[0]
+        return ClientCommunicationResponse(
+            communication_id=communication_data['communication_id'],
+            case_id=communication_data['case_id'],
+            channel=CommunicationChannel(communication_data['channel']),
+            direction=CommunicationDirection(communication_data['direction']),
+            status=DeliveryStatus(communication_data['status']),
+            sender=communication_data['sender'],
+            recipient=communication_data['recipient'],
+            subject=communication_data['subject'],
+            message_content=communication_data['message_content'],
+            created_at=datetime.fromisoformat(communication_data['created_at'].replace('Z', '+00:00')) if isinstance(communication_data['created_at'], str) else communication_data['created_at'],
+            sent_at=datetime.fromisoformat(communication_data['sent_at'].replace('Z', '+00:00')) if communication_data.get('sent_at') and isinstance(communication_data['sent_at'], str) else communication_data.get('sent_at'),
+            opened_at=datetime.fromisoformat(communication_data['opened_at'].replace('Z', '+00:00')) if communication_data.get('opened_at') and isinstance(communication_data['opened_at'], str) else communication_data.get('opened_at'),
+            resend_id=communication_data['resend_id']
+        )
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get communication: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.put("/{communication_id}", response_model=ClientCommunicationResponse)
 async def update_communication(
@@ -131,110 +136,85 @@ async def update_communication(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Update communication record"""
-    db_pool = get_db_pool()
+    communications_service = get_communications_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Check if communication exists
-            existing_comm = await conn.fetchrow(
-                "SELECT * FROM client_communications WHERE communication_id = $1", 
-                communication_id
-            )
+        # Check if communication exists first
+        existing_result = await communications_service.get_communication_by_id(communication_id)
+        if not existing_result.success or not existing_result.data:
+            raise HTTPException(status_code=404, detail="Communication not found")
+        
+        # Build update data from request
+        update_data = {}
+        
+        if request.channel is not None:
+            update_data["channel"] = request.channel.value
             
-            if not existing_comm:
+        if request.direction is not None:
+            update_data["direction"] = request.direction.value
+            
+        if request.status is not None:
+            update_data["status"] = request.status.value
+            
+        if request.sender is not None:
+            update_data["sender"] = request.sender
+            
+        if request.recipient is not None:
+            update_data["recipient"] = request.recipient
+            
+        if request.subject is not None:
+            update_data["subject"] = request.subject
+            
+        if request.message_content is not None:
+            update_data["message_content"] = request.message_content
+            
+        if request.sent_at is not None:
+            update_data["sent_at"] = request.sent_at.isoformat() if hasattr(request.sent_at, 'isoformat') else request.sent_at
+            
+        if request.opened_at is not None:
+            update_data["opened_at"] = request.opened_at.isoformat() if hasattr(request.opened_at, 'isoformat') else request.opened_at
+            
+        if request.resend_id is not None:
+            update_data["resend_id"] = request.resend_id
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields provided for update")
+        
+        # Update the communication
+        result = await communications_service.update(communication_id, update_data)
+        
+        if not result.success:
+            if result.error_type == "RESOURCE_NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Communication not found")
-            
-            # Build dynamic update query
-            update_fields = []
-            update_values = []
-            param_count = 1
-            
-            if request.channel is not None:
-                update_fields.append(f"channel = ${param_count}")
-                update_values.append(request.channel.value)
-                param_count += 1
-                
-            if request.direction is not None:
-                update_fields.append(f"direction = ${param_count}")
-                update_values.append(request.direction.value)
-                param_count += 1
-                
-            if request.status is not None:
-                update_fields.append(f"status = ${param_count}")
-                update_values.append(request.status.value)
-                param_count += 1
-                
-            if request.sender is not None:
-                update_fields.append(f"sender = ${param_count}")
-                update_values.append(request.sender)
-                param_count += 1
-                
-            if request.recipient is not None:
-                update_fields.append(f"recipient = ${param_count}")
-                update_values.append(request.recipient)
-                param_count += 1
-                
-            if request.subject is not None:
-                update_fields.append(f"subject = ${param_count}")
-                update_values.append(request.subject)
-                param_count += 1
-                
-            if request.message_content is not None:
-                update_fields.append(f"message_content = ${param_count}")
-                update_values.append(request.message_content)
-                param_count += 1
-                
-            if request.sent_at is not None:
-                update_fields.append(f"sent_at = ${param_count}")
-                update_values.append(request.sent_at)
-                param_count += 1
-                
-            if request.opened_at is not None:
-                update_fields.append(f"opened_at = ${param_count}")
-                update_values.append(request.opened_at)
-                param_count += 1
-                
-            if request.resend_id is not None:
-                update_fields.append(f"resend_id = ${param_count}")
-                update_values.append(request.resend_id)
-                param_count += 1
-            
-            if not update_fields:
-                raise HTTPException(status_code=400, detail="No fields provided for update")
-            
-            update_values.append(communication_id)  # for WHERE clause
-            
-            query = f"""
-                UPDATE client_communications 
-                SET {', '.join(update_fields)}
-                WHERE communication_id = ${param_count}
-                RETURNING communication_id, case_id, channel, direction, status, sender, recipient,
-                          subject, message_content, created_at, sent_at, opened_at, resend_id
-            """
-            
-            updated_comm = await conn.fetchrow(query, *update_values)
-            
-            return ClientCommunicationResponse(
-                communication_id=updated_comm['communication_id'],
-                case_id=updated_comm['case_id'],
-                channel=CommunicationChannel(updated_comm['channel']),
-                direction=CommunicationDirection(updated_comm['direction']),
-                status=DeliveryStatus(updated_comm['status']),
-                sender=updated_comm['sender'],
-                recipient=updated_comm['recipient'],
-                subject=updated_comm['subject'],
-                message_content=updated_comm['message_content'],
-                created_at=updated_comm['created_at'],
-                sent_at=updated_comm['sent_at'],
-                opened_at=updated_comm['opened_at'],
-                resend_id=updated_comm['resend_id']
-            )
-            
+            elif result.error_type == "UNAUTHORIZED_OPERATION":
+                raise HTTPException(status_code=403, detail=result.error)
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        updated_comm = result.data[0]
+        return ClientCommunicationResponse(
+            communication_id=updated_comm['communication_id'],
+            case_id=updated_comm['case_id'],
+            channel=CommunicationChannel(updated_comm['channel']),
+            direction=CommunicationDirection(updated_comm['direction']),
+            status=DeliveryStatus(updated_comm['status']),
+            sender=updated_comm['sender'],
+            recipient=updated_comm['recipient'],
+            subject=updated_comm['subject'],
+            message_content=updated_comm['message_content'],
+            created_at=datetime.fromisoformat(updated_comm['created_at'].replace('Z', '+00:00')) if isinstance(updated_comm['created_at'], str) else updated_comm['created_at'],
+            sent_at=datetime.fromisoformat(updated_comm['sent_at'].replace('Z', '+00:00')) if updated_comm.get('sent_at') and isinstance(updated_comm['sent_at'], str) else updated_comm.get('sent_at'),
+            opened_at=datetime.fromisoformat(updated_comm['opened_at'].replace('Z', '+00:00')) if updated_comm.get('opened_at') and isinstance(updated_comm['opened_at'], str) else updated_comm.get('opened_at'),
+            resend_id=updated_comm['resend_id']
+        )
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to update communication: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.delete("/{communication_id}")
 async def delete_communication(
@@ -242,36 +222,33 @@ async def delete_communication(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Delete communication record"""
-    db_pool = get_db_pool()
+    communications_service = get_communications_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Check if communication exists
-            existing_comm = await conn.fetchrow(
-                "SELECT communication_id, case_id FROM client_communications WHERE communication_id = $1", 
-                communication_id
-            )
-            
-            if not existing_comm:
+        result = await communications_service.delete_communication(communication_id)
+        
+        if not result.success:
+            if result.error_type == "RESOURCE_NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Communication not found")
-            
-            # Delete the communication
-            await conn.execute(
-                "DELETE FROM client_communications WHERE communication_id = $1",
-                communication_id
-            )
-            
-            return {
-                "message": "Communication deleted successfully",
-                "communication_id": communication_id,
-                "case_id": str(existing_comm['case_id'])
-            }
-            
+            elif result.error_type == "UNAUTHORIZED_OPERATION":
+                raise HTTPException(status_code=403, detail=result.error)
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        deleted_data = result.data[0]
+        return {
+            "message": "Communication deleted successfully",
+            "communication_id": deleted_data['communication_id'],
+            "case_id": deleted_data['case_id']
+        }
+        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete communication: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.get("", response_model=List[ClientCommunicationResponse])
 async def list_communications(
@@ -284,67 +261,46 @@ async def list_communications(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """List communications with optional filters"""
-    db_pool = get_db_pool()
+    communications_service = get_communications_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Build dynamic WHERE clause
-            where_conditions = []
-            query_params = []
-            param_count = 1
-            
-            if case_id:
-                where_conditions.append(f"case_id = ${param_count}")
-                query_params.append(case_id)
-                param_count += 1
-                
-            if channel:
-                where_conditions.append(f"channel = ${param_count}")
-                query_params.append(channel.value)
-                param_count += 1
-                
-            if direction:
-                where_conditions.append(f"direction = ${param_count}")
-                query_params.append(direction.value)
-                param_count += 1
-                
-            if status:
-                where_conditions.append(f"status = ${param_count}")
-                query_params.append(status.value)
-                param_count += 1
-            
-            where_clause = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
-            
-            query = f"""
-                SELECT communication_id, case_id, channel, direction, status, sender, recipient,
-                       subject, message_content, created_at, sent_at, opened_at, resend_id
-                FROM client_communications 
-                {where_clause}
-                ORDER BY created_at DESC
-                LIMIT ${param_count} OFFSET ${param_count + 1}
-            """
-            query_params.extend([limit, offset])
-            
-            communications = await conn.fetch(query, *query_params)
-            
-            return [
-                ClientCommunicationResponse(
-                    communication_id=comm['communication_id'],
-                    case_id=comm['case_id'],
-                    channel=CommunicationChannel(comm['channel']),
-                    direction=CommunicationDirection(comm['direction']),
-                    status=DeliveryStatus(comm['status']),
-                    sender=comm['sender'],
-                    recipient=comm['recipient'],
-                    subject=comm['subject'],
-                    message_content=comm['message_content'],
-                    created_at=comm['created_at'],
-                    sent_at=comm['sent_at'],
-                    opened_at=comm['opened_at'],
-                    resend_id=comm['resend_id']
-                ) for comm in communications
-            ]
-            
+        result = await communications_service.search_communications(
+            case_id=case_id,
+            channel=channel.value if channel else None,
+            direction=direction.value if direction else None,
+            status=status.value if status else None,
+            limit=limit,
+            offset=offset
+        )
+        
+        if not result.success:
+            if result.error_type == "UNAUTHORIZED_OPERATION":
+                raise HTTPException(status_code=403, detail=result.error)
+            elif result.error_type == "INVALID_QUERY":
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        return [
+            ClientCommunicationResponse(
+                communication_id=comm['communication_id'],
+                case_id=comm['case_id'],
+                channel=CommunicationChannel(comm['channel']),
+                direction=CommunicationDirection(comm['direction']),
+                status=DeliveryStatus(comm['status']),
+                sender=comm['sender'],
+                recipient=comm['recipient'],
+                subject=comm['subject'],
+                message_content=comm['message_content'],
+                created_at=datetime.fromisoformat(comm['created_at'].replace('Z', '+00:00')) if isinstance(comm['created_at'], str) else comm['created_at'],
+                sent_at=datetime.fromisoformat(comm['sent_at'].replace('Z', '+00:00')) if comm.get('sent_at') and isinstance(comm['sent_at'], str) else comm.get('sent_at'),
+                opened_at=datetime.fromisoformat(comm['opened_at'].replace('Z', '+00:00')) if comm.get('opened_at') and isinstance(comm['opened_at'], str) else comm.get('opened_at'),
+                resend_id=comm['resend_id']
+            ) for comm in result.data
+        ]
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to list communications: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")

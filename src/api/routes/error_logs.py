@@ -183,16 +183,14 @@ async def delete_error_log(
         
         existing_log = get_result.data[0]
         
-        # Since service layer doesn't support DELETE (per MVP spec),
-        # we'll use a direct database approach for backward compatibility
-        from database.connection import get_db_pool
-        db_pool = get_db_pool()
+        # Use service layer for delete operation
+        delete_result = await error_service.delete_error_log(error_id)
         
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM error_logs WHERE error_id = $1",
-                error_id
-            )
+        if not delete_result.success:
+            if delete_result.error_type == "RESOURCE_NOT_FOUND":
+                raise HTTPException(status_code=404, detail="Error log not found")
+            else:
+                raise HTTPException(status_code=500, detail=delete_result.error)
         
         return {
             "message": "Error log deleted successfully",

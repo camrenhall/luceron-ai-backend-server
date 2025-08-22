@@ -250,6 +250,35 @@ class ErrorLogsService(BaseService):
             order_by=[{"field": "component"}, {"field": "severity"}],
             limit=1000  # Large limit for summary data
         )
+    
+    async def delete_error_log(self, error_id: str) -> ServiceResult:
+        """
+        Delete an error log entry
+        
+        Args:
+            error_id: UUID of the error log to delete
+            
+        Returns:
+            ServiceResult indicating success/failure
+        """
+        logger.info(f"Deleting error log {error_id}")
+        
+        try:
+            # Verify error log exists first
+            get_result = await self.get_by_id(error_id)
+            if not get_result.success:
+                return get_result  # Return the same error
+            
+            # Use the base service delete method
+            return await self.delete(error_id)
+            
+        except Exception as e:
+            logger.error(f"Delete error log failed for {error_id}: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
 
 # Global service instance
 _error_logs_service: Optional[ErrorLogsService] = None

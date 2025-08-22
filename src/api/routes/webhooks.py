@@ -1,5 +1,6 @@
 """
-Webhook API routes
+Webhook API routes - Unified Service Layer Architecture
+Webhook signature verification stays in route, database operations use service layer.
 """
 
 import logging
@@ -7,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from models.webhook import ResendWebhook
 from utils.helpers import parse_uploaded_timestamp
-from database.connection import get_db_pool
+from services.communications_service import get_communications_service
 from utils.webhook_verification import verify_resend_webhook
 
 router = APIRouter()
@@ -22,77 +23,78 @@ async def handle_resend_webhook(request: Request):
     # Parse the verified payload into ResendWebhook model
     webhook = ResendWebhook(**payload)
     
-    db_pool = get_db_pool()
+    communications_service = get_communications_service()
     
     logger.info(f"📧 Resend webhook received: type={webhook.type}, email_id={webhook.data.email_id}")
     
     try:
-        async with db_pool.acquire() as conn:
-            if webhook.type == "email.opened":
-                # Parse the opened timestamp (top-level created_at is when email was opened)
-                opened_at = parse_uploaded_timestamp(webhook.created_at)
-                
-                # Update opened_at timestamp AND set status to "opened"
-                result = await conn.execute("""
-                    UPDATE client_communications 
-                    SET opened_at = $1, status = 'opened'
-                    WHERE resend_id = $2
-                """, opened_at, webhook.data.email_id)
-                
-                action = "opened"
-                
-            elif webhook.type == "email.failed":
-                # Only update status to "failed" (no timestamp update)
-                result = await conn.execute("""
-                    UPDATE client_communications 
-                    SET status = 'failed'
-                    WHERE resend_id = $1
-                """, webhook.data.email_id)
-                
-                failure_reason = webhook.data.failed.reason if webhook.data.failed else "unknown"
-                logger.info(f"❌ Email failed: reason={failure_reason}")
-                action = f"failed (reason: {failure_reason})"
-                
-            elif webhook.type == "email.bounced":
-                # Only update status to "failed" (no timestamp update)
-                result = await conn.execute("""
-                    UPDATE client_communications 
-                    SET status = 'failed'
-                    WHERE resend_id = $1
-                """, webhook.data.email_id)
-                
-                bounce_info = ""
-                if webhook.data.bounce:
-                    bounce_info = f"{webhook.data.bounce.type}/{webhook.data.bounce.subType}: {webhook.data.bounce.message}"
-                
-                logger.info(f"🔄 Email bounced: {bounce_info}")
-                action = f"bounced ({bounce_info})"
-                
-            elif webhook.type == "email.delivered":
-                # Only update status to "delivered" (no timestamp update)
-                result = await conn.execute("""
-                    UPDATE client_communications 
-                    SET status = 'delivered'
-                    WHERE resend_id = $1
-                """, webhook.data.email_id)
-                
-                action = "delivered"
-                
-            else:
-                logger.warning(f"⚠️ Unsupported webhook type: {webhook.type}")
-                return {"status": "unsupported", "type": webhook.type, "message": "Webhook type not supported"}
+        # Process different webhook types
+        if webhook.type == "email.opened":
+            # Parse the opened timestamp (top-level created_at is when email was opened)
+            opened_at = parse_uploaded_timestamp(webhook.created_at)
             
-            # Check if any row was updated
-            rows_updated = int(result.split()[-1]) if result.startswith("UPDATE") else 0
+            # Update via service layer
+            result = await communications_service.update_communication_status(
+                resend_id=webhook.data.email_id,
+                status="opened",
+                opened_at=opened_at
+            )
             
-            if rows_updated > 0:
-                logger.info(f"✅ Email {action}: Updated {rows_updated} record(s) for email_id={webhook.data.email_id}")
-                return {"status": "updated", "email_id": webhook.data.email_id, "rows_updated": rows_updated, "action": action}
-            else:
+            action = "opened"
+            
+        elif webhook.type == "email.failed":
+            # Update status to "failed"
+            result = await communications_service.update_communication_status(
+                resend_id=webhook.data.email_id,
+                status="failed"
+            )
+            
+            failure_reason = webhook.data.failed.reason if webhook.data.failed else "unknown"
+            logger.info(f"❌ Email failed: reason={failure_reason}")
+            action = f"failed (reason: {failure_reason})"
+            
+        elif webhook.type == "email.bounced":
+            # Update status to "failed"  
+            result = await communications_service.update_communication_status(
+                resend_id=webhook.data.email_id,
+                status="failed"
+            )
+            
+            bounce_info = ""
+            if webhook.data.bounce:
+                bounce_info = f"{webhook.data.bounce.type}/{webhook.data.bounce.subType}: {webhook.data.bounce.message}"
+            
+            logger.info(f"🔄 Email bounced: {bounce_info}")
+            action = f"bounced ({bounce_info})"
+            
+        elif webhook.type == "email.delivered":
+            # Update status to "delivered"
+            result = await communications_service.update_communication_status(
+                resend_id=webhook.data.email_id,
+                status="delivered"
+            )
+            
+            action = "delivered"
+            
+        else:
+            logger.warning(f"⚠️ Unsupported webhook type: {webhook.type}")
+            return {"status": "unsupported", "type": webhook.type, "message": "Webhook type not supported"}
+        
+        # Check result from service
+        if result.success:
+            rows_updated = 1 if result.data else 0
+            logger.info(f"✅ Email {action}: Updated {rows_updated} record(s) for email_id={webhook.data.email_id}")
+            return {"status": "updated", "email_id": webhook.data.email_id, "rows_updated": rows_updated, "action": action}
+        else:
+            if result.error_type == "RESOURCE_NOT_FOUND":
                 # Email ID not found - log but don't fail (as per requirements)
                 logger.info(f"ℹ️ Resend webhook: email_id={webhook.data.email_id} not found in database (likely from another system)")
                 return {"status": "not_found", "email_id": webhook.data.email_id, "message": "Email ID not found in database"}
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Resend webhook processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Webhook processing failed: {str(e)}")

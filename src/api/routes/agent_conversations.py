@@ -9,9 +9,11 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from models.agent import (
     AgentConversationCreate, AgentConversationUpdate, AgentConversationResponse,
     ConversationWithMessages, ConversationHistoryRequest, AgentType, ConversationStatus,
-    MessageRole
+    MessageRole, AgentMessageResponse, AgentSummaryResponse
 )
-from database.connection import get_db_pool
+from services.agent_services import (
+    get_agent_conversations_service, get_agent_messages_service, get_agent_summaries_service
+)
 from utils.auth import AuthConfig
 
 router = APIRouter()
@@ -23,28 +25,36 @@ async def create_conversation(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Create a new agent conversation"""
-    db_pool = get_db_pool()
+    agent_conversations_service = get_agent_conversations_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                INSERT INTO agent_conversations (agent_type, status)
-                VALUES ($1, $2)
-                RETURNING conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
-            """, request.agent_type.value, request.status.value)
+        result = await agent_conversations_service.create_conversation(
+            agent_type=request.agent_type.value,
+            status=request.status.value
+        )
+        
+        if not result.success:
+            logger.error(f"Failed to create conversation: {result.error}")
+            raise HTTPException(status_code=500, detail=result.error)
+        
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=500, detail="No data returned from service")
+        
+        row = result.data[0]
+        return AgentConversationResponse(
+            conversation_id=row['conversation_id'],
+            agent_type=AgentType(row['agent_type']),
+            status=ConversationStatus(row['status']),
+            total_tokens_used=row['total_tokens_used'],
+            created_at=row['created_at'],
+            updated_at=row['updated_at']
+        )
             
-            return AgentConversationResponse(
-                conversation_id=row['conversation_id'],
-                                agent_type=AgentType(row['agent_type']),
-                status=ConversationStatus(row['status']),
-                total_tokens_used=row['total_tokens_used'],
-                created_at=row['created_at'],
-                updated_at=row['updated_at']
-            )
-            
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create conversation: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.get("/{conversation_id}", response_model=AgentConversationResponse)
 async def get_conversation(
@@ -52,33 +62,35 @@ async def get_conversation(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Get conversation by ID"""
-    db_pool = get_db_pool()
+    agent_conversations_service = get_agent_conversations_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                SELECT conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
-                FROM agent_conversations 
-                WHERE conversation_id = $1
-            """, conversation_id)
-            
-            if not row:
+        result = await agent_conversations_service.get_conversation_by_id(conversation_id)
+        
+        if not result.success:
+            if result.error_type == "NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Conversation not found")
-            
-            return AgentConversationResponse(
-                conversation_id=row['conversation_id'],
-                                agent_type=AgentType(row['agent_type']),
-                status=ConversationStatus(row['status']),
-                total_tokens_used=row['total_tokens_used'],
-                created_at=row['created_at'],
-                updated_at=row['updated_at']
-            )
+            logger.error(f"Failed to get conversation: {result.error}")
+            raise HTTPException(status_code=500, detail=result.error)
+        
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        row = result.data[0]
+        return AgentConversationResponse(
+            conversation_id=row['conversation_id'],
+            agent_type=AgentType(row['agent_type']),
+            status=ConversationStatus(row['status']),
+            total_tokens_used=row['total_tokens_used'],
+            created_at=row['created_at'],
+            updated_at=row['updated_at']
+        )
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get conversation: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.put("/{conversation_id}", response_model=AgentConversationResponse)
 async def update_conversation(
@@ -87,51 +99,44 @@ async def update_conversation(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Update conversation status"""
-    db_pool = get_db_pool()
+    agent_conversations_service = get_agent_conversations_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Build dynamic update query
-            update_fields = []
-            update_values = []
-            param_count = 1
-            
-            if request.status is not None:
-                update_fields.append(f"status = ${param_count}")
-                update_values.append(request.status.value)
-                param_count += 1
-            
-            if not update_fields:
-                raise HTTPException(status_code=400, detail="No fields provided for update")
-            
-            # Add conversation_id as the final parameter
-            update_values.append(conversation_id)
-            query = f"""
-                UPDATE agent_conversations 
-                SET {', '.join(update_fields)}, updated_at = NOW()
-                WHERE conversation_id = ${param_count}
-                RETURNING conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
-            """
-            
-            row = await conn.fetchrow(query, *update_values)
-            
-            if not row:
+        # Build update data
+        update_data = {}
+        
+        if request.status is not None:
+            update_data["status"] = request.status.value
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No fields provided for update")
+        
+        result = await agent_conversations_service.update(conversation_id, update_data)
+        
+        if not result.success:
+            if result.error_type == "NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Conversation not found")
-            
-            return AgentConversationResponse(
-                conversation_id=row['conversation_id'],
-                                agent_type=AgentType(row['agent_type']),
-                status=ConversationStatus(row['status']),
-                total_tokens_used=row['total_tokens_used'],
-                created_at=row['created_at'],
-                updated_at=row['updated_at']
-            )
+            logger.error(f"Failed to update conversation: {result.error}")
+            raise HTTPException(status_code=500, detail=result.error)
+        
+        if not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        row = result.data[0]
+        return AgentConversationResponse(
+            conversation_id=row['conversation_id'],
+            agent_type=AgentType(row['agent_type']),
+            status=ConversationStatus(row['status']),
+            total_tokens_used=row['total_tokens_used'],
+            created_at=row['created_at'],
+            updated_at=row['updated_at']
+        )
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to update conversation: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.delete("/{conversation_id}")
 async def delete_conversation(
@@ -139,25 +144,24 @@ async def delete_conversation(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Delete conversation (cascades to messages and summaries)"""
-    db_pool = get_db_pool()
+    agent_conversations_service = get_agent_conversations_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            result = await conn.execute(
-                "DELETE FROM agent_conversations WHERE conversation_id = $1",
-                conversation_id
-            )
-            
-            if result == "DELETE 0":
+        result = await agent_conversations_service.delete(conversation_id)
+        
+        if not result.success:
+            if result.error_type == "NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Conversation not found")
-            
-            return {"message": "Conversation deleted successfully", "conversation_id": conversation_id}
+            logger.error(f"Failed to delete conversation: {result.error}")
+            raise HTTPException(status_code=500, detail=result.error)
+        
+        return {"message": "Conversation deleted successfully", "conversation_id": conversation_id}
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to delete conversation: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.get("", response_model=List[AgentConversationResponse])
 async def list_conversations(
@@ -168,52 +172,51 @@ async def list_conversations(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """List conversations with optional filters"""
-    db_pool = get_db_pool()
+    agent_conversations_service = get_agent_conversations_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Build dynamic WHERE clause
-            where_conditions = []
-            query_params = []
-            param_count = 1
-            
-            if agent_type:
-                where_conditions.append(f"agent_type = ${param_count}")
-                query_params.append(agent_type.value)
-                param_count += 1
+        # Build filters
+        filters = {}
+        
+        if agent_type:
+            filters["agent_type"] = agent_type.value
                 
-            if status:
-                where_conditions.append(f"status = ${param_count}")
-                query_params.append(status.value)
-                param_count += 1
+        if status:
+            filters["status"] = status.value
+        
+        # Build order_by for descending order by created_at
+        order_by = [{"field": "created_at", "dir": "desc"}]
+        
+        result = await agent_conversations_service.read(
+            filters=filters,
+            order_by=order_by,
+            limit=limit,
+            offset=offset
+        )
+        
+        if not result.success:
+            logger.error(f"Failed to list conversations: {result.error}")
+            raise HTTPException(status_code=500, detail=result.error)
+        
+        if not result.data:
+            return []
+        
+        return [
+            AgentConversationResponse(
+                conversation_id=row['conversation_id'],
+                agent_type=AgentType(row['agent_type']),
+                status=ConversationStatus(row['status']),
+                total_tokens_used=row['total_tokens_used'],
+                created_at=row['created_at'],
+                updated_at=row['updated_at']
+            ) for row in result.data
+        ]
             
-            where_clause = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
-            
-            query = f"""
-                SELECT conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
-                FROM agent_conversations 
-                {where_clause}
-                ORDER BY created_at DESC
-                LIMIT ${param_count} OFFSET ${param_count + 1}
-            """
-            query_params.extend([limit, offset])
-            
-            rows = await conn.fetch(query, *query_params)
-            
-            return [
-                AgentConversationResponse(
-                    conversation_id=row['conversation_id'],
-                                        agent_type=AgentType(row['agent_type']),
-                    status=ConversationStatus(row['status']),
-                    total_tokens_used=row['total_tokens_used'],
-                    created_at=row['created_at'],
-                    updated_at=row['updated_at']
-                ) for row in rows
-            ]
-            
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to list conversations: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
 
 @router.get("/{conversation_id}/full", response_model=ConversationWithMessages)
 async def get_conversation_with_messages(
@@ -223,44 +226,45 @@ async def get_conversation_with_messages(
     _: bool = Depends(AuthConfig.get_auth_dependency())
 ):
     """Get conversation with all messages and summaries"""
-    db_pool = get_db_pool()
+    agent_conversations_service = get_agent_conversations_service()
+    agent_messages_service = get_agent_messages_service()
+    agent_summaries_service = get_agent_summaries_service()
     
     try:
-        async with db_pool.acquire() as conn:
-            # Get conversation
-            conv_row = await conn.fetchrow("""
-                SELECT conversation_id, agent_type, status, total_tokens_used, created_at, updated_at
-                FROM agent_conversations 
-                WHERE conversation_id = $1
-            """, conversation_id)
-            
-            if not conv_row:
+        # Get conversation
+        conv_result = await agent_conversations_service.get_conversation_by_id(conversation_id)
+        
+        if not conv_result.success:
+            if conv_result.error_type == "NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Conversation not found")
+            logger.error(f"Failed to get conversation: {conv_result.error}")
+            raise HTTPException(status_code=500, detail=conv_result.error)
+        
+        if not conv_result.data or len(conv_result.data) == 0:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        conv_row = conv_result.data[0]
+        
+        # Get messages
+        messages_result = await agent_messages_service.get_messages_by_conversation(conversation_id)
+        
+        if not messages_result.success:
+            logger.error(f"Failed to get messages: {messages_result.error}")
+            raise HTTPException(status_code=500, detail=messages_result.error)
+        
+        messages = messages_result.data or []
+        
+        # Get summaries if requested
+        summaries = []
+        if include_summaries:
+            summaries_result = await agent_summaries_service.get_summaries_by_conversation(conversation_id)
             
-            # Get messages
-            message_fields = "message_id, conversation_id, role, content, total_tokens, model_used, created_at, sequence_number"
-            if include_function_calls:
-                message_fields += ", function_name, function_arguments, function_response"
-            
-            messages = await conn.fetch(f"""
-                SELECT {message_fields}
-                FROM agent_messages 
-                WHERE conversation_id = $1
-                ORDER BY sequence_number ASC
-            """, conversation_id)
-            
-            # Get summaries if requested
-            summaries = []
-            if include_summaries:
-                summary_rows = await conn.fetch("""
-                    SELECT summary_id, conversation_id, last_message_id, summary_content, 
-                           messages_summarized, created_at, updated_at
-                    FROM agent_summaries 
-                    WHERE conversation_id = $1
-                    ORDER BY created_at ASC
-                """, conversation_id)
-                
-                from models.agent import AgentSummaryResponse
+            if not summaries_result.success:
+                logger.error(f"Failed to get summaries: {summaries_result.error}")
+                # Don't fail the whole request if summaries fail, just log and continue
+                summaries = []
+            else:
+                summary_rows = summaries_result.data or []
                 summaries = [
                     AgentSummaryResponse(
                         summary_id=row['summary_id'],
@@ -272,49 +276,48 @@ async def get_conversation_with_messages(
                         updated_at=row['updated_at']
                     ) for row in summary_rows
                 ]
+        
+        # Build message responses
+        message_responses = []
+        for row in messages:
+            message_data = {
+                "message_id": row['message_id'],
+                "conversation_id": row['conversation_id'],
+                "role": MessageRole(row['role']),
+                "content": row['content'],
+                "total_tokens": row['total_tokens'],
+                "model_used": row['model_used'],
+                "created_at": row['created_at'],
+                "sequence_number": row['sequence_number'],
+                "function_name": None,
+                "function_arguments": None,
+                "function_response": None
+            }
             
-            from models.agent import AgentMessageResponse
-            message_responses = []
-            for row in messages:
-                message_data = {
-                    "message_id": row['message_id'],
-                    "conversation_id": row['conversation_id'],
-                    "role": MessageRole(row['role']),
-                    "content": row['content'],
-                    "total_tokens": row['total_tokens'],
-                    "model_used": row['model_used'],
-                    "created_at": row['created_at'],
-                    "sequence_number": row['sequence_number'],
-                    "function_name": None,
-                    "function_arguments": None,
-                    "function_response": None
-                }
-                
-                if include_function_calls:
-                    message_data.update({
-                        "function_name": row.get('function_name'),
-                        "function_arguments": row.get('function_arguments'),
-                        "function_response": row.get('function_response')
-                    })
-                
-                message_responses.append(AgentMessageResponse(**message_data))
+            if include_function_calls:
+                message_data.update({
+                    "function_name": row.get('function_name'),
+                    "function_arguments": row.get('function_arguments'),
+                    "function_response": row.get('function_response')
+                })
             
-            return ConversationWithMessages(
-                conversation=AgentConversationResponse(
-                    conversation_id=conv_row['conversation_id'],
-                    case_id=conv_row['case_id'],
-                    agent_type=AgentType(conv_row['agent_type']),
-                    status=ConversationStatus(conv_row['status']),
-                    total_tokens_used=conv_row['total_tokens_used'],
-                    created_at=conv_row['created_at'],
-                    updated_at=conv_row['updated_at']
-                ),
-                messages=message_responses,
-                summaries=summaries
-            )
+            message_responses.append(AgentMessageResponse(**message_data))
+        
+        return ConversationWithMessages(
+            conversation=AgentConversationResponse(
+                conversation_id=conv_row['conversation_id'],
+                agent_type=AgentType(conv_row['agent_type']),
+                status=ConversationStatus(conv_row['status']),
+                total_tokens_used=conv_row['total_tokens_used'],
+                created_at=conv_row['created_at'],
+                updated_at=conv_row['updated_at']
+            ),
+            messages=message_responses,
+            summaries=summaries
+        )
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get conversation with messages: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Service error: {str(e)}")
