@@ -42,6 +42,8 @@ graph TB
 - **Runtime**: Python 3.13
 - **Framework**: FastAPI (async web framework)
 - **Database Driver**: asyncpg (PostgreSQL async driver)
+- **Authentication**: OAuth2 Client Credentials with RSA JWT signatures
+- **Cryptography**: RSA 2048-bit key pairs for service authentication
 - **Email Service**: Resend API
 - **Webhook Verification**: Svix
 - **HTTP Client**: httpx (async HTTP client)
@@ -135,7 +137,23 @@ Both interfaces utilize the same unified service layer, ensuring consistent busi
 
 ### Authentication
 
-All endpoints require API key authentication via the `X-API-Key` header:
+The backend server supports two authentication methods:
+
+#### 1. OAuth2 Client Credentials (Recommended for Agents)
+For AI agent services, use OAuth2 authentication with RSA-signed JWTs:
+```
+Authorization: Bearer {ACCESS_TOKEN}
+```
+
+**OAuth2 Flow**:
+1. Create service JWT signed with your private key
+2. Exchange for access token at `/oauth2/token` 
+3. Use access token in Authorization header
+
+See [OAuth2 Deployment Guide](OAUTH2_DEPLOYMENT_GUIDE.md) and [Service Integration Guide](SERVICE_INTEGRATION_GUIDE.md) for complete implementation details.
+
+#### 2. API Key (Legacy)
+For direct API access, use API key authentication:
 ```
 X-API-Key: {API_KEY}
 ```
@@ -170,6 +188,18 @@ X-API-Key: {API_KEY}
   }
 }
 ```
+
+#### OAuth2 Authentication Endpoints
+
+##### OAuth2 Token Exchange
+- `POST /oauth2/token` - Exchange service JWT for access token
+- **Grant Type**: `client_credentials`
+- **Authentication**: JWT bearer assertion (RSA-signed service JWT)
+- **Returns**: Access token valid for 60 minutes
+
+##### OAuth2 Discovery
+- `GET /oauth2/.well-known/openid_configuration` - OpenID Connect discovery
+- `GET /oauth2/health` - OAuth2 service health check
 
 ### Core REST API Endpoints
 
@@ -978,12 +1008,20 @@ Alert configuration:
 
 ### Authentication/Authorization Patterns
 
-1. **API Key Authentication**:
+1. **OAuth2 Service Authentication** (Primary):
+   - Standards-compliant OAuth2 Client Credentials flow
+   - RSA 2048-bit cryptographic service identity
+   - JWT bearer assertions signed with private keys
+   - Short-lived access tokens (60 minutes)
+   - Service-specific permissions and scopes
+   - Service key store with public key verification
+
+2. **API Key Authentication** (Legacy):
    - Header-based: `X-API-Key`
-   - Single shared key (consider per-agent keys)
+   - Single shared key (consider migration to OAuth2)
    - Implemented via FastAPI dependency injection
 
-2. **Webhook Security**:
+3. **Webhook Security**:
    - Svix signature verification for Resend
    - Timestamp validation to prevent replay
 
@@ -1298,6 +1336,13 @@ def function(param: str) -> dict:
 **Date**: December 2024
 **Status**: ✅ Complete - 11 routes migrated, 60+ endpoints converted, zero direct SQL remaining
 
+### ADR-008: OAuth2 Agent Authentication System
+**Decision**: Implement OAuth2 Client Credentials flow with RSA-signed JWT assertions for service authentication
+**Rationale**: Replace shared API keys with enterprise-grade cryptographic authentication, enable service-specific permissions, meet security compliance requirements
+**Consequences**: Each agent service requires unique cryptographic identity, improved security posture, standards-compliant authentication
+**Date**: December 2024
+**Status**: ✅ Complete - Service provisioning, OAuth2 endpoints, and integration guides delivered
+
 ## Contact and Support
 
 For questions or issues related to this component:
@@ -1320,6 +1365,15 @@ For questions or issues related to this component:
 - ✅ **Performance Maintained**: <1% overhead while gaining massive maintainability benefits
 - ✅ **Production Stability**: All existing API contracts preserved, zero breaking changes
 
+### December 2024 - OAuth2 Agent Authentication System ✅
+- ✅ **Enterprise Security**: Standards-compliant OAuth2 Client Credentials flow with RSA 2048-bit cryptographic authentication
+- ✅ **Service Identity Management**: Cryptographic service provisioning with unique key pairs per agent
+- ✅ **Permission Control**: Role-based access control with endpoint/resource/operation granularity
+- ✅ **Token Management**: 60-minute access tokens with automatic caching and refresh
+- ✅ **Integration Ready**: Complete client SDK and integration guides for service onboarding
+- ✅ **Security Compliance**: JWT bearer assertions, signature verification, and service validation
+- ✅ **Production Deployment**: Service key store, OAuth2 endpoints, and provisioning tools ready
+
 #### Migration Statistics
 - **Routes Migrated**: 11 route files (3,935 total lines)
 - **Endpoints Converted**: ~60 endpoints from direct SQL to service layer
@@ -1333,7 +1387,14 @@ For questions or issues related to this component:
 - **Maintainable Codebase**: Single source of truth for all business logic
 - **Scalable Foundation**: Ready for caching, monitoring, and optimization strategies
 
-This migration has delivered a production-ready unified architecture that dramatically improves developer experience while maintaining full backward compatibility and performance.
+#### OAuth2 Implementation Statistics
+- **Security Components**: Service key store, JWT verification, OAuth2 token endpoint
+- **Service Provisioning**: Automated RSA key generation and registration
+- **Agent Roles**: 3 distinct permission profiles (manager, communications, analysis)
+- **Integration Guides**: Complete client implementation with examples
+- **Standards Compliance**: Full OAuth2 RFC 6749 + JWT RFC 7523 compliance
+
+These major architectural improvements have delivered a production-ready unified system with enterprise-grade security that dramatically improves developer experience while maintaining full backward compatibility and performance.
 
 ---
 

@@ -16,7 +16,7 @@ from agent_gateway.planner import get_planner
 from agent_gateway.validator import get_validator
 from agent_gateway.executor import get_executor
 from agent_gateway.contracts.registry import get_all_contracts
-from utils.auth import AuthConfig, AuthContext
+from utils.auth import AuthConfig, AuthContext, AgentAuthContext
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -25,17 +25,19 @@ logger = logging.getLogger(__name__)
 @router.post("/agent/db", response_model=AgentDbResponse)
 async def agent_database_operation(
     request: AgentDbRequest,
-    auth_context: AuthContext = Depends(AuthConfig.get_auth_dependency())
+    agent_auth: AgentAuthContext = Depends(AuthConfig.get_agent_auth_dependency())
 ):
     """
-    Single endpoint for natural language database operations
+    Single endpoint for natural language database operations with agent authentication
     
     Implements the NL-to-CRUD Gateway specification:
     1. Router: NL + hints → resources + intent
-    2. Contracts: Load resource contracts for role
+    2. Contracts: Load resource contracts for agent role
     3. Planner: NL + contracts → DSL
     4. Validator: Validate DSL against contracts
     5. Executor: Execute DSL via internal CRUD
+    
+    Authentication: Requires agent JWT token in Authorization: Bearer header
     """
     
     # Generate request ID for logging/tracing
@@ -44,8 +46,9 @@ async def agent_database_operation(
     
     logger.info(f"[{request_id}] Agent DB request started", extra={
         "request_id": request_id,
-        "actor_id": auth_context.actor_id,
-        "role": auth_context.role,
+        "agent_type": agent_auth.agent_type,
+        "service_id": agent_auth.service_id,
+        "agent_resources": agent_auth.allowed_resources,
         "natural_language": request.natural_language,
         "hints": request.hints.dict() if request.hints else None
     })
@@ -60,23 +63,36 @@ async def agent_database_operation(
         
         logger.info(f"[{request_id}] Router result: {router_result}")
         
-        # Step 2: Load contracts for selected resources
-        # Extract role and actor from auth context
-        role = auth_context.role
-        actor_id = auth_context.actor_id
-        all_contracts = get_all_contracts(role)
+        # Step 2: Load contracts for selected resources based on agent permissions
+        from agent_gateway.contracts.registry import get_agent_contracts
         
-        # Filter to only contracts for selected resources
+        # Get contracts filtered by agent permissions
+        all_agent_contracts = get_agent_contracts(agent_auth)
+        
+        # Filter to only contracts for selected resources that agent can access
         selected_contracts = {
-            resource: all_contracts[resource]
+            resource: all_agent_contracts[resource]
             for resource in router_result.resources
-            if resource in all_contracts
+            if resource in all_agent_contracts
         }
+        
+        # Check if agent has permissions for requested resources
+        unauthorized_resources = [
+            resource for resource in router_result.resources
+            if resource not in all_agent_contracts
+        ]
+        
+        if unauthorized_resources:
+            logger.warning(f"[{request_id}] Agent {agent_auth.agent_type} denied access to resources: {unauthorized_resources}")
+            return AgentDbResponse.error(
+                error_type="UNAUTHORIZED_OPERATION",
+                message=f"Agent '{agent_auth.agent_type}' not authorized to access resources: {unauthorized_resources}"
+            )
         
         if not selected_contracts:
             return AgentDbResponse.error(
                 error_type="RESOURCE_NOT_FOUND",
-                message=f"No valid contracts found for resources: {router_result.resources}"
+                message=f"No accessible contracts found for resources: {router_result.resources}. Agent has access to: {list(all_agent_contracts.keys())}"
             )
         
         logger.info(f"[{request_id}] Loaded contracts for: {list(selected_contracts.keys())}")
@@ -97,7 +113,7 @@ async def agent_database_operation(
         validation_error = validator_component.validate(
             dsl=planner_result.dsl,
             contracts=selected_contracts,
-            role=role
+            role=agent_auth.agent_type  # Use agent type as role
         )
         
         if validation_error:
@@ -131,7 +147,7 @@ async def agent_database_operation(
         executor_result = await executor_component.execute(
             dsl=planner_result.dsl,
             contracts=selected_contracts,
-            role=role
+            role=agent_auth.agent_type  # Use agent type as role
         )
         
         # Build response pagination if present
@@ -157,8 +173,8 @@ async def agent_database_operation(
         
         logger.info(f"[{request_id}] Request completed successfully", extra={
             "request_id": request_id,
-            "actor_id": actor_id,
-            "role": role,
+            "agent_type": agent_auth.agent_type,
+            "service_id": agent_auth.service_id,
             "operation": executor_result.operation,
             "resource": executor_result.resource,
             "rows_returned": executor_result.count,
@@ -216,8 +232,8 @@ async def agent_database_operation(
         
         logger.error(f"[{request_id}] Request failed with error", extra={
             "request_id": request_id,
-            "actor_id": auth_context.actor_id,
-            "role": auth_context.role,
+            "agent_type": agent_auth.agent_type,
+            "service_id": agent_auth.service_id,
             "error": str(e),
             "duration_ms": duration_ms
         })

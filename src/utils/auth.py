@@ -3,20 +3,33 @@ Authentication utilities for API endpoints
 """
 
 import logging
-from typing import Optional
+from typing import Optional, List
 from fastapi import HTTPException, Header, Depends
 from dataclasses import dataclass
+import jwt
 
-from config.settings import API_KEY
+from config.service_permissions import get_agent_permissions, is_valid_agent_role
+from services.agent_jwt_service import validate_agent_jwt
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class AuthContext:
-    """Authentication context containing user information"""
+    """Legacy authentication context for backward compatibility"""
     is_authenticated: bool
     role: str = "default"
     actor_id: Optional[str] = None
+
+
+@dataclass
+class AgentAuthContext:
+    """Authentication context for OAuth2-authenticated agents"""
+    is_authenticated: bool
+    agent_type: str
+    service_id: str  # Which service requested this token
+    allowed_endpoints: List[str]
+    allowed_resources: List[str]
+    allowed_operations: List[str]
 
 
 async def authenticate_api(authorization: Optional[str] = Header(None)) -> AuthContext:
@@ -83,6 +96,74 @@ async def authenticate_api(authorization: Optional[str] = Header(None)) -> AuthC
     )
 
 
+async def authenticate_agent_jwt(
+    authorization: Optional[str] = Header(None)
+) -> AgentAuthContext:
+    """
+    OAuth2 access token authentication for agents
+    
+    Args:
+        authorization: Authorization header with Bearer access token
+        
+    Returns:
+        AgentAuthContext: Agent authentication context
+        
+    Raises:
+        HTTPException: 401 if authentication fails, 403 if agent role invalid
+    """
+    logger.info("AGENT_AUTH: Starting OAuth2 access token authentication")
+    
+    # Validate Authorization header
+    if not authorization:
+        logger.error("AGENT_AUTH: Missing Authorization header")
+        raise HTTPException(401, "Missing Authorization header")
+    
+    if not authorization.startswith("Bearer "):
+        logger.error("AGENT_AUTH: Invalid Authorization header format")
+        raise HTTPException(401, "Invalid authorization header format. Expected 'Bearer <access_token>'")
+    
+    access_token = authorization[7:]  # Remove "Bearer " prefix
+    
+    try:
+        # Validate access token and extract claims
+        jwt_payload = validate_agent_jwt(access_token)
+        agent_role = jwt_payload['sub']
+        service_id = jwt_payload.get('service_id', 'unknown')
+        
+        logger.info(f"AGENT_AUTH: Access token validation successful for agent: {agent_role}, service: {service_id}")
+        
+        # Look up permissions from backend configuration
+        # This is the key security feature - backend resolves permissions
+        permissions = get_agent_permissions(agent_role)
+        
+        if not permissions:
+            logger.error(f"AGENT_AUTH: No permissions found for agent role: {agent_role}")
+            raise HTTPException(403, f"Agent role '{agent_role}' not configured")
+        
+        # Create auth context
+        auth_context = AgentAuthContext(
+            is_authenticated=True,
+            agent_type=agent_role,
+            service_id=service_id,
+            allowed_endpoints=permissions['endpoints'],
+            allowed_resources=permissions['resources'],
+            allowed_operations=permissions['operations']
+        )
+        
+        logger.info(f"AGENT_AUTH: OAuth2 authentication successful for {agent_role} (service: {service_id})")
+        logger.debug(f"AGENT_AUTH: Granted permissions - Resources: {permissions['resources']}, Operations: {permissions['operations']}")
+        
+        return auth_context
+        
+    except jwt.InvalidTokenError as e:
+        logger.error(f"AGENT_AUTH: Invalid access token: {str(e)}")
+        raise HTTPException(401, "Invalid access token")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"AGENT_AUTH: OAuth2 authentication error: {str(e)}")
+        raise HTTPException(401, "OAuth2 authentication failed")
+
 
 class AuthConfig:
     """
@@ -99,3 +180,8 @@ class AuthConfig:
     def get_auth_dependency():
         """Get the mandatory auth dependency for all endpoints"""
         return authenticate_api
+    
+    @staticmethod
+    def get_agent_auth_dependency():
+        """Get the agent-specific auth dependency"""
+        return authenticate_agent_jwt
