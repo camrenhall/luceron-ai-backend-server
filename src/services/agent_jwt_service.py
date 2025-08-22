@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # JWT configuration
 AGENT_JWT_SECRET = "your-agent-jwt-secret-key"  # Should be environment variable in production
 AGENT_JWT_ALGORITHM = "HS256"
-AGENT_JWT_EXPIRY_MINUTES = 1440  # 24-hour access tokens
+AGENT_JWT_EXPIRY_MINUTES = 15  # 15-minute access tokens
 
 class AgentJWTService:
     """Service for generating and validating minimal agent JWTs"""
@@ -54,7 +54,7 @@ class AgentJWTService:
         
         token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
         
-        logger.info(f"Generated 24-hour access token for agent role: {agent_role}")
+        logger.info(f"Generated 15-minute access token for agent role: {agent_role}")
         return token
     
     def validate_and_decode_jwt(self, token: str) -> Dict[str, Any]:
@@ -107,7 +107,7 @@ class AgentJWTService:
             service_id: Service that requested the token
             
         Returns:
-            24-hour access token
+            15-minute access token
         """
         if not is_valid_agent_role(agent_role):
             raise ValueError(f"Unknown agent role: {agent_role}")
@@ -154,7 +154,7 @@ def generate_agent_jwt(agent_role: str) -> str:
     return agent_jwt_service.generate_agent_jwt(agent_role)
 
 def generate_access_token(agent_role: str, service_id: str) -> str:
-    """Generate 24-hour access token for authenticated service"""
+    """Generate 15-minute access token for authenticated service"""
     return agent_jwt_service.generate_access_token(agent_role, service_id)
 
 def validate_agent_jwt(token: str) -> Dict[str, Any]:

@@ -23,7 +23,7 @@ class ServiceAuthenticator:
     
     # Service JWT configuration
     SERVICE_JWT_ALGORITHM = "RS256"
-    SERVICE_JWT_MAX_AGE_MINUTES = 5  # Service JWTs expire quickly
+    SERVICE_JWT_MAX_AGE_MINUTES = 15  # Service JWTs expire in 15 minutes
     EXPECTED_AUDIENCE = "luceron-auth-server"
     
     def __init__(self):

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class OAuth2TokenResponse:
     """OAuth2 token response model"""
     
-    def __init__(self, access_token: str, token_type: str = "Bearer", expires_in: int = 3600, scope: str = None):
+    def __init__(self, access_token: str, token_type: str = "Bearer", expires_in: int = 900, scope: str = None):
         self.access_token = access_token
         self.token_type = token_type
         self.expires_in = expires_in
@@ -49,9 +49,9 @@ async def oauth2_token(
     - client_assertion: Service JWT signed with private key
     
     Returns:
-    - access_token: 24-hour JWT for API access
+    - access_token: 15-minute JWT for API access
     - token_type: "Bearer"
-    - expires_in: 86400 (seconds)
+    - expires_in: 900 (seconds)
     - scope: Agent role scope
     """
     
@@ -106,7 +106,7 @@ async def oauth2_token(
         token_response = OAuth2TokenResponse(
             access_token=access_token,
             token_type="Bearer",
-            expires_in=86400,  # 24 hours in seconds
+            expires_in=900,  # 15 minutes in seconds
             scope=f"agent:{service_identity.agent_role}"
         )
         
