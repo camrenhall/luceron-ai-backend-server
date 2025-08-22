@@ -6,3 +6,4 @@ pydantic
 httpx
 svix
 openai
+PyJWT

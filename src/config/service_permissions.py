@@ -45,12 +45,15 @@ SERVICE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
         "operations": ["READ", "INSERT"],  # Can read documents, write analysis results
         "description": "AWS Lambda document processing pipeline"
     },
+    "gcp_cloud_functions": {
+        "endpoints": ["/alert"],
+        "resources": [],  # No database access
+        "operations": [],  # No database operations
+        "description": "GCP Cloud Functions with REST access to alerts endpoint only"
+    },
     "camren_master": {
         "endpoints": [
-            "*",  # Full access to all endpoints
-            "/emergency/suspend",
-            "/emergency/resume", 
-            "/emergency/status"
+            "*"  # Full access to all endpoints
         ],
         "resources": ["*"],  # Full access to all resources
         "operations": ["READ", "INSERT", "UPDATE", "DELETE"],  # All operations
