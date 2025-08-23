@@ -194,7 +194,11 @@ class TestDatabaseManager:
                     await conn.execute(statement)
                 except Exception as e:
                     print(f"   ⚠️  Warning: DDL statement {i+1} failed: {e}")
-                    print(f"      Statement: {statement[:100]}...")
+                    if "USER" in str(e) or "syntax error" in str(e):
+                        # Print full statement for debugging Supabase syntax issues
+                        print(f"      Full Statement: {statement}")
+                    else:
+                        print(f"      Statement: {statement[:100]}...")
                     # Continue with other statements
             
             await conn.close()

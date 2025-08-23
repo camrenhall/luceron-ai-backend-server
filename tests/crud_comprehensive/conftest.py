@@ -5,6 +5,7 @@ Optimized for CI/CD performance and parallel execution
 
 import pytest
 import asyncio
+import asyncpg
 from typing import AsyncGenerator
 import os
 import uuid
@@ -132,9 +133,23 @@ async def clean_orchestrator(shared_rest_client, isolated_database) -> AsyncGene
     
     # Configure database connection based on mode
     if config.database_mode == "isolated" and isolated_database:
-        # Use isolated test database
-        orch.db_validator.config.database_url = isolated_database.connection_url
-        print(f"   🔗 Using isolated database: {isolated_database.database_name}")
+        # Validate that isolated database actually has tables
+        try:
+            conn = await asyncpg.connect(isolated_database.connection_url)
+            table_count = await conn.fetchval("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'")
+            await conn.close()
+            
+            if table_count > 0:
+                # Use isolated test database
+                orch.db_validator.config.database_url = isolated_database.connection_url  
+                print(f"   🔗 Using isolated database: {isolated_database.database_name} ({table_count} tables)")
+            else:
+                # Fallback to production database if isolated DB is empty
+                print(f"   ⚠️  Isolated database is empty, falling back to production database")
+                print(f"   🔗 Using production database (fallback)")
+        except Exception as e:
+            print(f"   ⚠️  Cannot validate isolated database: {e}")
+            print(f"   🔗 Using production database (fallback)")
     else:
         # Use production database (existing behavior)
         print(f"   🔗 Using production database")

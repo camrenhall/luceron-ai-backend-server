@@ -33,6 +33,7 @@ class TableSchema:
 class DatabaseSchema:
     """Complete database schema"""
     tables: Dict[str, TableSchema]
+    enums: Dict[str, List[str]]  # enum_name -> [enum_values]
     schema_hash: str
     extracted_at: str
     version: str = "1.0"
@@ -70,6 +71,13 @@ class SchemaExtractor:
             )
             print(f"   📋 Found {len(tables_to_extract)} tables to extract")
             
+            # Extract enum types first
+            enums = await asyncio.wait_for(
+                self._extract_enums(conn),
+                timeout=15.0
+            )
+            print(f"   🎭 Found {len(enums)} enum types")
+            
             # Extract schema for each table with timeout protection
             table_schemas = {}
             for table_name in tables_to_extract:
@@ -87,6 +95,7 @@ class SchemaExtractor:
             # Create complete schema object
             schema_data = {
                 "tables": {name: asdict(schema) for name, schema in table_schemas.items()},
+                "enums": enums,
                 "extracted_at": datetime.now().isoformat(),
                 "version": "1.0"
             }
@@ -97,6 +106,7 @@ class SchemaExtractor:
             
             schema = DatabaseSchema(
                 tables=table_schemas,
+                enums=enums,
                 schema_hash=schema_hash,
                 extracted_at=schema_data["extracted_at"],
                 version=schema_data["version"]
@@ -166,6 +176,7 @@ class SchemaExtractor:
         SELECT 
             column_name,
             data_type,
+            udt_name,
             is_nullable,
             column_default,
             character_maximum_length,
@@ -262,17 +273,21 @@ class SchemaExtractor:
         """Generate DDL statements to recreate schema in test database"""
         ddl_statements = []
         
-        # First pass: Create tables without foreign keys
+        # First pass: Create enum types (must come before tables)
+        enum_statements = self._generate_enum_ddl(schema)
+        ddl_statements.extend(enum_statements)
+        
+        # Second pass: Create tables without foreign keys
         for table_name, table_schema in schema.tables.items():
             create_sql = self._generate_table_ddl(table_schema, include_fks=False)
             ddl_statements.append(create_sql)
         
-        # Second pass: Add foreign key constraints
+        # Third pass: Add foreign key constraints
         for table_name, table_schema in schema.tables.items():
             fk_statements = self._generate_foreign_key_ddl(table_schema)
             ddl_statements.extend(fk_statements)
         
-        # Third pass: Create indexes (except primary keys which are already created)
+        # Fourth pass: Create indexes (except primary keys which are already created)
         for table_name, table_schema in schema.tables.items():
             index_statements = self._generate_index_ddl(table_schema)
             ddl_statements.extend(index_statements)
@@ -284,7 +299,13 @@ class SchemaExtractor:
         columns = []
         
         for col in table_schema.columns:
-            col_def = f'"{col["column_name"]}" {col["data_type"]}'
+            # Handle USER-DEFINED types (enums) by using their actual type name
+            if col["data_type"] == "USER-DEFINED" and col.get("udt_name"):
+                data_type = col["udt_name"]
+            else:
+                data_type = col["data_type"]
+                
+            col_def = f'"{col["column_name"]}" {data_type}'
             
             # Add length/precision
             if col["character_maximum_length"]:
@@ -353,26 +374,77 @@ REFERENCES "{fk["foreign_table_name"]}" ("{fk["foreign_column_name"]}")'''
         if not default_value:
             return None
         
-        # Handle Supabase USER() function -> current user
-        if "USER" in default_value:
-            return "CURRENT_USER"
+        # Debug: print original value for troubleshooting
+        original = default_value
         
-        # Handle uuid_generate_v4() -> gen_random_uuid() for PostgreSQL 13+
-        if "uuid_generate_v4()" in default_value:
-            return "gen_random_uuid()"
+        # Handle various Supabase-specific functions and syntax
         
-        # Handle Supabase-specific timestamp functions
-        if "CURRENT_TIMESTAMP" in default_value:
-            return "CURRENT_TIMESTAMP"
-        
-        # Handle now() function
-        if "now()" in default_value:
-            return "CURRENT_TIMESTAMP"
-        
-        # Remove any quoted string indicators that might cause issues
+        # Remove type casts first
         cleaned = default_value.replace("::text", "").strip()
         
+        # Handle Supabase USER() or (USER) -> current user  
+        if "USER" in cleaned.upper():
+            cleaned = "CURRENT_USER"
+        
+        # Handle uuid_generate_v4() -> gen_random_uuid()
+        elif "uuid_generate_v4()" in cleaned:
+            cleaned = "gen_random_uuid()"
+        
+        # Handle Supabase auth.uid() -> generate a dummy uuid for testing
+        elif "auth.uid()" in cleaned:
+            cleaned = "gen_random_uuid()"
+        
+        # Handle now() function
+        elif "now()" in cleaned:
+            cleaned = "CURRENT_TIMESTAMP"
+        
+        # Handle CURRENT_TIMESTAMP (already correct)
+        elif "CURRENT_TIMESTAMP" in cleaned:
+            cleaned = "CURRENT_TIMESTAMP"
+        
+        # Skip complex expressions that might have parentheses issues
+        elif "(" in cleaned and ")" in cleaned and not any(func in cleaned for func in ["gen_random_uuid", "CURRENT_TIMESTAMP", "CURRENT_USER"]):
+            print(f"   🐞 Skipping complex default: {original} -> None")
+            return None
+        
+        # If we changed it, log the transformation
+        if cleaned != original:
+            print(f"   🔧 Normalized default: {original} -> {cleaned}")
+        
         return cleaned if cleaned else None
+    
+    async def _extract_enums(self, conn: asyncpg.Connection) -> Dict[str, List[str]]:
+        """Extract enum types from database"""
+        query = """
+        SELECT 
+            t.typname as type_name,
+            array_agg(e.enumlabel ORDER BY e.enumsortorder) as enum_values
+        FROM pg_type t 
+        JOIN pg_enum e ON t.oid = e.enumtypid  
+        WHERE t.typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+        GROUP BY t.typname
+        ORDER BY t.typname
+        """
+        
+        rows = await conn.fetch(query)
+        enums = {}
+        for row in rows:
+            enum_name = row['type_name']
+            enum_values = list(row['enum_values'])
+            enums[enum_name] = enum_values
+        
+        return enums
+    
+    def _generate_enum_ddl(self, schema: DatabaseSchema) -> List[str]:
+        """Generate CREATE TYPE statements for enums"""
+        enum_statements = []
+        
+        for enum_name, enum_values in schema.enums.items():
+            values_str = ', '.join([f"'{value}'" for value in enum_values])
+            create_enum = f"CREATE TYPE {enum_name} AS ENUM ({values_str});"
+            enum_statements.append(create_enum)
+        
+        return enum_statements
     
     def _generate_index_ddl(self, table_schema: TableSchema) -> List[str]:
         """Generate CREATE INDEX statements"""
