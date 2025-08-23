@@ -8,6 +8,7 @@ import asyncio
 from typing import AsyncGenerator
 import os
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import sys
 from pathlib import Path
@@ -16,6 +17,34 @@ sys.path.insert(0, str(Path(__file__).parent))
 from core.test_orchestrator import TestOrchestrator
 from core.rest_client import RestClient
 from core.test_db_manager import TestDatabaseManager, SchemaChangeDetector
+
+# === OAUTH MOCKING FOR TEST ENVIRONMENTS ===
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_oauth_in_test_env():
+    """Mock OAuth functionality when ENVIRONMENT=test"""
+    if os.getenv('ENVIRONMENT') == 'test':
+        # Mock the _get_access_token method to return a dummy token
+        with patch.object(RestClient, '_get_access_token', new_callable=AsyncMock) as mock_token:
+            mock_token.return_value = "dummy_test_token_12345"
+            
+            # Also mock the config validation to skip OAuth key requirement
+            from config import TestConfig
+            original_validate = TestConfig.validate
+            
+            def mock_validate(self):
+                errors = []
+                if not self.database_url:
+                    errors.append("DATABASE_URL is required")
+                if not self.api_base_url:
+                    errors.append("AGENT_DB_BASE_URL is required")
+                # Skip OAuth key validation in test environment
+                return errors
+            
+            with patch.object(TestConfig, 'validate', mock_validate):
+                yield mock_token
+    else:
+        yield
 
 
 # === SCHEMA CHANGE DETECTION ===
