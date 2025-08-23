@@ -62,7 +62,16 @@ jobs:
           luceron-api:test
         
         # Wait for API to be ready
-        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+        echo "Waiting for API to start..."
+        sleep 10
+        echo "Checking API container logs:"
+        docker logs test-api
+        echo "Attempting health check..."
+        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do echo "Health check failed, retrying..."; sleep 2; done' || {
+          echo "Health check timed out. Final container logs:"
+          docker logs test-api
+          exit 1
+        }
     
     - name: Run smoke tests (Fully Isolated)
       env:
@@ -143,7 +152,16 @@ jobs:
           luceron-api:test
         
         # Wait for API to be ready
-        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+        echo "Waiting for API to start..."
+        sleep 10
+        echo "Checking API container logs:"
+        docker logs test-api
+        echo "Attempting health check..."
+        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do echo "Health check failed, retrying..."; sleep 2; done' || {
+          echo "Health check timed out. Final container logs:"
+          docker logs test-api
+          exit 1
+        }
     
     - name: Run regression tests (Fully Isolated)
       env:
@@ -225,7 +243,16 @@ jobs:
           luceron-api:test
         
         # Wait for API to be ready
-        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+        echo "Waiting for API to start..."
+        sleep 10
+        echo "Checking API container logs:"
+        docker logs test-api
+        echo "Attempting health check..."
+        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do echo "Health check failed, retrying..."; sleep 2; done' || {
+          echo "Health check timed out. Final container logs:"
+          docker logs test-api
+          exit 1
+        }
     
     - name: Run parallel tests (Fully Isolated)
       env:
