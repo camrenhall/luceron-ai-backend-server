@@ -307,13 +307,14 @@ class SchemaExtractor:
                 
             col_def = f'"{col["column_name"]}" {data_type}'
             
-            # Add length/precision
-            if col["character_maximum_length"]:
+            # Add length/precision (only for types that support it)
+            if col["character_maximum_length"] and data_type.startswith(('character', 'varchar', 'char')):
                 col_def += f'({col["character_maximum_length"]})'
-            elif col["numeric_precision"] and col["numeric_scale"]:
+            elif col["numeric_precision"] and col["numeric_scale"] and data_type in ('numeric', 'decimal'):
                 col_def += f'({col["numeric_precision"]},{col["numeric_scale"]})'
-            elif col["numeric_precision"]:
+            elif col["numeric_precision"] and data_type in ('numeric', 'decimal'):
                 col_def += f'({col["numeric_precision"]})'
+            # Skip precision for integer, bigint, etc. - PostgreSQL doesn't support it
             
             # Add NOT NULL
             if col["is_nullable"] == "NO":
