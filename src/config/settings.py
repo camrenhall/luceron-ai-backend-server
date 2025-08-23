@@ -10,7 +10,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Environment configuration
+# Environment configuration  
+ENV = os.getenv("ENV", "PROD")  # PROD or QA
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL")
@@ -21,6 +22,35 @@ ADMIN_ALERT_EMAILS = [email.strip() for email in os.getenv("ADMIN_ALERT_EMAILS",
 
 # Agent gateway configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Environment-specific JWT configuration for secure token isolation
+class JWTEnvironmentConfig:
+    """Environment-isolated JWT configuration to prevent cross-environment token reuse"""
+    
+    QA_CONFIG = {
+        "secret": os.getenv("QA_JWT_SECRET", "qa-default-secret-for-development"),
+        "issuer": "luceron-qa-auth",
+        "audience": "luceron-qa-api", 
+        "allowed_algorithms": ["HS256"],
+        "max_token_age": 3600  # 1 hour for testing workflows
+    }
+    
+    PROD_CONFIG = {
+        "secret": os.getenv("PROD_JWT_SECRET", "prod-default-secret-change-in-production"),
+        "issuer": "luceron-prod-auth",
+        "audience": "luceron-prod-api",
+        "allowed_algorithms": ["HS256"], 
+        "max_token_age": 900  # 15 minutes for production security
+    }
+    
+    @classmethod
+    def get_config(cls):
+        """Get JWT configuration for current environment"""
+        return cls.QA_CONFIG if ENV == "QA" else cls.PROD_CONFIG
+
+logger.info(f"Environment: {ENV}")
+jwt_config = JWTEnvironmentConfig.get_config()
+logger.info(f"JWT Config - Issuer: {jwt_config['issuer']}, Audience: {jwt_config['audience']}")
 
 # Validate required environment variables
 if not DATABASE_URL:

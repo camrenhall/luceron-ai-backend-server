@@ -26,10 +26,10 @@ class TestConfig:
     # API Endpoints - Test API container
     api_base_url: str = os.getenv('TEST_API_BASE_URL', 'http://localhost:8080')
     
-    # OAuth Configuration
-    oauth_service_id: str = os.getenv('OAUTH_SERVICE_ID', 'test_service')
+    # Environment-Isolated OAuth Configuration for QA Testing
+    oauth_service_id: str = os.getenv('OAUTH_SERVICE_ID', 'qa_comprehensive_test_service')
     oauth_private_key: str = os.getenv('OAUTH_PRIVATE_KEY', '')
-    oauth_audience: str = os.getenv('OAUTH_AUDIENCE', 'test-auth-server')
+    oauth_audience: str = os.getenv('OAUTH_AUDIENCE', 'luceron-auth-server')  # Service auth audience
     
     # Email Service - Always use dummy key for testing
     resend_api_key: str = "dummy_resend_key_for_testing"
@@ -56,9 +56,8 @@ class TestConfig:
         if not self.qa_database_url:
             errors.append("QA_DATABASE_URL is required")
             
-        # Only require OAuth key in production-like environments
-        if not self.oauth_private_key and os.getenv('ENVIRONMENT') not in ['test', 'testing']:
-            errors.append("OAUTH_PRIVATE_KEY is required")
+        if not self.oauth_private_key:
+            errors.append("OAUTH_PRIVATE_KEY is required for authentication")
             
         return errors
 

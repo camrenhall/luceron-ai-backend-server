@@ -44,9 +44,8 @@ jobs:
           -e ADMIN_ALERT_EMAILS="admin@testing.local" \
           -e RESEND_WEBHOOK_SECRET="whsec_test_dummy_webhook_secret" \
           -e PORT="8080" \
-          -e ENVIRONMENT="test" \
-          -e ENABLE_AUTH="false" \
-          -e ENABLE_EXTERNAL_APIS="false" \
+          -e ENV="QA" \
+          -e QA_JWT_SECRET="${{ secrets.QA_JWT_SECRET }}" \
           -e LOG_LEVEL="INFO" \
           -e CI="true" \
           -p 8080:8080 \
@@ -90,8 +89,9 @@ jobs:
         
         # Test configuration
         DB_MODE: "qa"
-        ENVIRONMENT: "test"
-        OAUTH_PRIVATE_KEY: ""
+        OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
+        OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
+        OAUTH_AUDIENCE: "luceron-auth-server"
         
       run: |
         cd tests/crud_comprehensive
@@ -153,9 +153,8 @@ jobs:
           -e ADMIN_ALERT_EMAILS="admin@testing.local" \
           -e RESEND_WEBHOOK_SECRET="whsec_test_dummy_webhook_secret" \
           -e PORT="8080" \
-          -e ENVIRONMENT="test" \
-          -e ENABLE_AUTH="false" \
-          -e ENABLE_EXTERNAL_APIS="false" \
+          -e ENV="QA" \
+          -e QA_JWT_SECRET="${{ secrets.QA_JWT_SECRET }}" \
           -e LOG_LEVEL="INFO" \
           -e CI="true" \
           -p 8080:8080 \
@@ -174,8 +173,9 @@ jobs:
         
         # Test configuration
         DB_MODE: "qa"
-        ENVIRONMENT: "test"
-        OAUTH_PRIVATE_KEY: ""
+        OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
+        OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
+        OAUTH_AUDIENCE: "luceron-auth-server"
         
       run: |
         cd tests/crud_comprehensive
@@ -227,9 +227,8 @@ jobs:
           -e ADMIN_ALERT_EMAILS="admin@testing.local" \
           -e RESEND_WEBHOOK_SECRET="whsec_test_dummy_webhook_secret" \
           -e PORT="8080" \
-          -e ENVIRONMENT="test" \
-          -e ENABLE_AUTH="false" \
-          -e ENABLE_EXTERNAL_APIS="false" \
+          -e ENV="QA" \
+          -e QA_JWT_SECRET="${{ secrets.QA_JWT_SECRET }}" \
           -e LOG_LEVEL="INFO" \
           -e CI="true" \
           -p 8080:8080 \
@@ -248,8 +247,9 @@ jobs:
         
         # Test configuration
         DB_MODE: "qa"
-        ENVIRONMENT: "test"
-        OAUTH_PRIVATE_KEY: ""
+        OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
+        OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
+        OAUTH_AUDIENCE: "luceron-auth-server"
         
       run: |
         cd tests/crud_comprehensive

@@ -1,5 +1,6 @@
 """
-Agent JWT service for generating and validating minimal agent tokens
+Environment-isolated Agent JWT service for secure token generation and validation
+Prevents cross-environment token reuse through environment-specific signing and validation
 """
 
 import jwt
@@ -8,21 +9,20 @@ import logging
 from typing import Dict, Any
 from datetime import datetime, timedelta
 
-from config.service_permissions import is_valid_agent_role
+from config.service_permissions import is_valid_agent_role, get_service_permissions
+from config.settings import JWTEnvironmentConfig, ENV
 
 logger = logging.getLogger(__name__)
 
-# JWT configuration
-AGENT_JWT_SECRET = "your-agent-jwt-secret-key"  # Should be environment variable in production
-AGENT_JWT_ALGORITHM = "HS256"
-AGENT_JWT_EXPIRY_MINUTES = 15  # 15-minute access tokens
-
 class AgentJWTService:
-    """Service for generating and validating minimal agent JWTs"""
+    """Environment-isolated service for generating and validating agent JWTs"""
     
-    def __init__(self, secret_key: str = AGENT_JWT_SECRET):
-        self.secret_key = secret_key
-        self.algorithm = AGENT_JWT_ALGORITHM
+    def __init__(self):
+        self.jwt_config = JWTEnvironmentConfig.get_config()
+        self.secret_key = self.jwt_config["secret"]
+        self.algorithm = self.jwt_config["allowed_algorithms"][0]  # Use first allowed algorithm
+        self.issuer = self.jwt_config["issuer"]
+        self.audience = self.jwt_config["audience"]
     
     def generate_agent_jwt(self, agent_role: str) -> str:
         """
@@ -42,12 +42,14 @@ class AgentJWTService:
             raise ValueError(f"Unknown agent role: {agent_role}")
         
         current_time = int(time.time())
-        expiry_time = current_time + (AGENT_JWT_EXPIRY_MINUTES * 60)
+        expiry_time = current_time + (self.jwt_config["max_token_age"])
         
-        # Minimal JWT payload - backend resolves permissions
+        # Environment-aware JWT payload with security claims
         payload = {
-            "iss": "luceron-agent-system",
-            "sub": agent_role,  # This is the role/agent_type
+            "iss": self.issuer,  # Environment-specific issuer
+            "sub": agent_role,   # Agent role for permissions
+            "aud": self.audience,  # Environment-specific audience
+            "environment": ENV,    # Explicit environment claim for validation
             "iat": current_time,
             "exp": expiry_time
         }
@@ -59,7 +61,7 @@ class AgentJWTService:
     
     def validate_and_decode_jwt(self, token: str) -> Dict[str, Any]:
         """
-        Validate JWT signature and decode payload
+        Validate JWT with comprehensive security checks against tampering
         
         Args:
             token: JWT token string
@@ -68,35 +70,69 @@ class AgentJWTService:
             Decoded JWT payload
             
         Raises:
-            jwt.InvalidTokenError: If token is invalid
+            jwt.InvalidTokenError: If token is invalid, tampered, or from wrong environment
         """
         try:
+            # Hardened JWT validation with strict security controls
             payload = jwt.decode(
-                token, 
-                self.secret_key, 
-                algorithms=[self.algorithm],
-                options={"verify_aud": False}  # Skip audience verification for MVP
+                token,
+                self.secret_key,
+                algorithms=self.jwt_config["allowed_algorithms"],  # Strict algorithm allowlist
+                audience=self.audience,  # Environment-specific audience validation
+                issuer=self.issuer,      # Environment-specific issuer validation
+                options={
+                    "require_exp": True,     # Expiration required
+                    "require_iat": True,     # Issued-at required  
+                    "require_sub": True,     # Subject required
+                    "require_aud": True,     # Audience required
+                    "require_iss": True,     # Issuer required
+                    "verify_signature": True # Signature verification mandatory
+                }
             )
             
-            # Validate required fields exist
-            if 'sub' not in payload:
-                raise jwt.InvalidTokenError("Missing 'sub' claim")
+            # Validate environment claim matches current environment
+            token_env = payload.get('environment')
+            if not token_env:
+                raise jwt.InvalidTokenError("Missing environment claim")
+            if token_env != ENV:
+                raise jwt.InvalidTokenError(f"Environment mismatch: token='{token_env}', server='{ENV}'")
+            
+            # Validate required claims are present
+            required_claims = ["sub", "environment", "iss", "aud", "exp", "iat"]
+            for claim in required_claims:
+                if claim not in payload:
+                    raise jwt.InvalidTokenError(f"Missing required claim: {claim}")
             
             agent_role = payload['sub']
             
-            # Validate role still exists in configuration
+            # Validate role exists and is authorized for current environment
             if not is_valid_agent_role(agent_role):
                 raise jwt.InvalidTokenError(f"Invalid agent role: {agent_role}")
+                
+            # Validate agent role is authorized for current environment
+            permissions = get_service_permissions(agent_role)
+            if permissions and "environments" in permissions:
+                if ENV not in permissions["environments"]:
+                    raise jwt.InvalidTokenError(f"Agent '{agent_role}' not authorized for environment '{ENV}'")
             
-            logger.debug(f"Successfully validated JWT for agent role: {agent_role}")
+            logger.debug(f"Successfully validated environment-isolated JWT for agent role: {agent_role} in {ENV}")
             return payload
             
         except jwt.ExpiredSignatureError:
             logger.warning("JWT token has expired")
             raise jwt.InvalidTokenError("Token has expired")
+        except jwt.InvalidAudienceError:
+            logger.warning(f"JWT audience validation failed - expected: {self.audience}")
+            raise jwt.InvalidTokenError("Invalid audience")
+        except jwt.InvalidIssuerError:
+            logger.warning(f"JWT issuer validation failed - expected: {self.issuer}")
+            raise jwt.InvalidTokenError("Invalid issuer")
         except jwt.InvalidTokenError as e:
-            logger.warning(f"Invalid JWT token: {str(e)}")
+            logger.warning(f"JWT validation failed: {str(e)}")
             raise
+        except Exception as e:
+            logger.error(f"JWT validation error: {str(e)}")
+            raise jwt.InvalidTokenError("Token validation failed")
     
     def generate_access_token(self, agent_role: str, service_id: str) -> str:
         """
@@ -113,14 +149,15 @@ class AgentJWTService:
             raise ValueError(f"Unknown agent role: {agent_role}")
         
         current_time = int(time.time())
-        expiry_time = current_time + (AGENT_JWT_EXPIRY_MINUTES * 60)
+        expiry_time = current_time + (self.jwt_config["max_token_age"])
         
-        # Access token payload with service context
+        # Environment-aware access token payload with service context
         payload = {
-            "iss": "luceron-agent-system",
-            "sub": agent_role,  # Agent role for permissions
-            "aud": "luceron-api",
-            "service_id": service_id,  # Which service requested this token
+            "iss": self.issuer,       # Environment-specific issuer
+            "sub": agent_role,        # Agent role for permissions
+            "aud": self.audience,     # Environment-specific audience
+            "environment": ENV,       # Explicit environment claim
+            "service_id": service_id, # Which service requested this token
             "iat": current_time,
             "exp": expiry_time
         }

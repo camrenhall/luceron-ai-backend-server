@@ -18,18 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from core.test_orchestrator import CRUDTestOrchestrator
 from core.rest_client import RestClient
 
-# === OAUTH MOCKING FOR TEST ENVIRONMENTS ===
-
-@pytest.fixture(scope="session", autouse=True)
-def mock_oauth_in_test_env():
-    """Mock OAuth functionality when ENVIRONMENT=test"""
-    if os.getenv('ENVIRONMENT') == 'test':
-        # Mock the _get_access_token method to return a dummy token
-        with patch.object(RestClient, '_get_access_token', new_callable=AsyncMock) as mock_token:
-            mock_token.return_value = "dummy_test_token_12345"
-            yield mock_token
-    else:
-        yield
+# === CRUD DATABASE TESTING SETUP ===
 
 
 
@@ -51,10 +40,9 @@ def event_loop():
 
 @pytest.fixture(scope="session")
 async def shared_rest_client() -> AsyncGenerator[RestClient, None]:
-    """Shared REST client to reuse OAuth tokens across tests"""
+    """Shared REST client for CRUD testing (no auth required for test container)"""
     client = RestClient()
-    # Pre-authenticate to cache token
-    await client._get_access_token()
+    # No pre-authentication needed - test container has ENABLE_AUTH=false
     yield client
     # Cleanup handled by garbage collection
 

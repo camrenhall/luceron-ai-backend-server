@@ -46,15 +46,6 @@ async def authenticate_api(authorization: Optional[str] = Header(None)) -> AuthC
     Raises:
         HTTPException: 401 if authentication fails
     """
-    # Skip authentication in test environment
-    if os.getenv("ENVIRONMENT") == "test":
-        logger.info("AUTH: Test environment detected - bypassing authentication")
-        return AuthContext(
-            is_authenticated=True,
-            role="test_admin",
-            actor_id="test_service"
-        )
-    
     logger.info(f"AUTH: Starting JWT authentication check")
     
     if not authorization:
@@ -80,7 +71,7 @@ async def authenticate_api(authorization: Optional[str] = Header(None)) -> AuthC
         agent_role = jwt_payload['sub']
         service_id = jwt_payload.get('service_id', 'unknown')
         
-        logger.info(f"AUTH: JWT validation successful for agent: {agent_role}, service: {service_id}")
+        logger.info(f"AUTH: Environment-isolated JWT validation successful - Agent: {agent_role}, Service: {service_id}, Environment: {jwt_payload.get('environment', 'unknown')}")
         
         # Create backward-compatible AuthContext
         return AuthContext(
@@ -112,18 +103,6 @@ async def authenticate_agent_jwt(
     Raises:
         HTTPException: 401 if authentication fails, 403 if agent role invalid
     """
-    # Skip authentication in test environment
-    if os.getenv("ENVIRONMENT") == "test":
-        logger.info("AGENT_AUTH: Test environment detected - bypassing OAuth2 authentication")
-        return AgentAuthContext(
-            is_authenticated=True,
-            agent_type="test_agent",
-            service_id="test_service",
-            allowed_endpoints=["*"],  # Full access in test mode
-            allowed_resources=["*"],
-            allowed_operations=["*"]
-        )
-    
     logger.info("AGENT_AUTH: Starting OAuth2 access token authentication")
     
     # Validate Authorization header
@@ -143,7 +122,7 @@ async def authenticate_agent_jwt(
         agent_role = jwt_payload['sub']
         service_id = jwt_payload.get('service_id', 'unknown')
         
-        logger.info(f"AGENT_AUTH: Access token validation successful for agent: {agent_role}, service: {service_id}")
+        logger.info(f"AGENT_AUTH: Environment-isolated access token validation successful - Agent: {agent_role}, Service: {service_id}, Environment: {jwt_payload.get('environment', 'unknown')}")
         
         # Look up permissions from backend configuration
         # This is the key security feature - backend resolves permissions
@@ -184,10 +163,6 @@ class AuthConfig:
     All endpoints now require authentication.
     """
     
-    @staticmethod
-    def is_auth_enabled() -> bool:
-        """Authentication is enabled unless in test environment"""
-        return os.getenv("ENVIRONMENT") != "test"
     
     @staticmethod
     def get_auth_dependency():

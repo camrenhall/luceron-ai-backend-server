@@ -46,5 +46,13 @@
     "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArOvMrN125kyRfEHkY8zm\nQ+4V5M8eFYGbP9FsaAi+TvIyZvC1xSK0EJVGTImMevix28NNZTJLhC/8b1zcKW+b\ne4GNIZoLis2VqSxDo6g2OKQun3e3w4rl8dYJaK6lauKn4u+CANr+smwm/H4GlNTQ\nMEnisJRh7Wfq6d1117XF/1DG1CXyUU2GvmBF/sDv9BIQMj/GIIsn/Zkdfhq+MhJN\nwCNGOj3ZoD3hEAJIg0xUj161XZW5kFmzwbJOl/guHnjzJMG1tf1lFujy7A0FLAIf\nlsKzJywL574J3GRp3VDByEDQH96x/tI0w7NyNsMl7AX6sF9k2RDtxmm6y/zffpOH\naQIDAQAB\n-----END PUBLIC KEY-----\n",
     "is_active": true,
     "created_at": "2025-08-22T18:58:18.987130"
+  },
+  "qa_comprehensive_test_service": {
+    "service_id": "qa_comprehensive_test_service",
+    "service_name": "QA Comprehensive Test Service",
+    "agent_role": "qa_test_agent",
+    "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA+kBCdF9Aw2Phq60YLOzA\n1PlRi0T1xGXzbAYOlloZ8wptljdJKRYz+N2/BHiPrJATzUsObngXMuL5VU2P6VZ5\nP+jcLQtFi3wvrNS3lK7S0MxwqjMi5yh15digLoo48Os+2rfJI1GKltfjc4Nr1rTC\nJBSQHxqnUMaQWKdl9NDmSaeGlhPvqrzzJWQPSfJyHDZjHIaRurvxm0shVuW/NeZy\nOpmHo8h4jlcUfjkJmiIhtSWgDGuKQWW2/fXYlicOKFHVb9NJyiClnKaLj2dUgi78\nbTpDtMtgjkZSo1vb1Zc5WeqZA48BE/i6QNegTFALWDXNAT91hP2oOU4kLIfpzwVI\nYQIDAQAB\n-----END PUBLIC KEY-----\n",
+    "is_active": true,
+    "created_at": "2025-08-23T21:23:01.861217"
   }
 }
