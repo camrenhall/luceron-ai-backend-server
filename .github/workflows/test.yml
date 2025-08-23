@@ -76,6 +76,7 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
+        ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
       run: |
@@ -159,6 +160,7 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
+        ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
       run: |
@@ -243,6 +245,7 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
+        ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
       run: |
