@@ -97,20 +97,12 @@ jobs:
         cd tests/crud_comprehensive
         pip install -r requirements.txt
         
-        # Debug environment variables
-        echo "=== DEBUGGING ENVIRONMENT VARIABLES ==="
-        echo "QA_DATABASE_URL is set: $([ -n "$QA_DATABASE_URL" ] && echo "YES" || echo "NO")"
-        echo "QA_DATABASE_URL length: ${#QA_DATABASE_URL}"
-        echo "QA_DATABASE_URL first 50 chars: ${QA_DATABASE_URL:0:50}..."
-        echo "============================================"
         
         python runners/unified_runner.py --mode smoke --db-mode qa --output json --verbose || {
           echo "Tests failed, showing detailed pytest output:"
           if [ -f test-results.json ]; then
             echo "=== PYTEST RESULTS JSON ==="
             cat test-results.json
-            echo -e "\n=== EXTRACTING ERROR DETAILS ==="
-            python3 debug_test_results.py
           else
             echo "No test results file found"
           fi

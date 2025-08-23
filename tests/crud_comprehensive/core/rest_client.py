@@ -80,12 +80,16 @@ class RestClient:
         return self._cached_token.access_token
     
     async def request(self, method: str, endpoint: str, data: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict[str, Any]:
-        """Make authenticated REST request"""
-        access_token = await self._get_access_token()
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
+        """Make REST request (authenticated or not based on environment)"""
+        import os
+        
+        headers = {"Content-Type": "application/json"}
+        
+        # Only add authentication if not in test environment or if explicitly required
+        # Test containers run with ENABLE_AUTH=false, so skip auth entirely
+        if os.getenv('ENVIRONMENT') != 'test' and not self.config.api_base_url.startswith('http://localhost'):
+            access_token = await self._get_access_token()
+            headers["Authorization"] = f"Bearer {access_token}"
         
         url = f"{self.config.api_base_url}{endpoint}"
         
