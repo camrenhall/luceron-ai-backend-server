@@ -76,7 +76,7 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
-        OAUTH_PRIVATE_KEY: "dummy_oauth_key_for_testing"
+        OAUTH_PRIVATE_KEY: ""
         
       run: |
         cd tests/crud_comprehensive
@@ -159,7 +159,7 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
-        OAUTH_PRIVATE_KEY: "dummy_oauth_key_for_testing"
+        OAUTH_PRIVATE_KEY: ""
         
       run: |
         cd tests/crud_comprehensive
@@ -243,7 +243,7 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
-        OAUTH_PRIVATE_KEY: "dummy_oauth_key_for_testing"
+        OAUTH_PRIVATE_KEY: ""
         
       run: |
         cd tests/crud_comprehensive
