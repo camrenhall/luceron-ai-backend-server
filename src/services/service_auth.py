@@ -129,8 +129,14 @@ class ServiceAuthenticator:
         issued_at = datetime.fromtimestamp(payload['iat'])
         max_age = timedelta(minutes=self.SERVICE_JWT_MAX_AGE_MINUTES)
         
-        if datetime.utcnow() - issued_at > max_age:
-            logger.warning("Service JWT is too old")
+        # Use timezone-naive datetime consistently for comparison
+        current_time = datetime.utcnow()
+        age = current_time - issued_at
+        
+        logger.debug(f"JWT issued at: {issued_at}, current time: {current_time}, age: {age}, max_age: {max_age}")
+        
+        if age > max_age:
+            logger.warning(f"Service JWT is too old: issued {age} ago, max age {max_age}")
             return False
         
         return True

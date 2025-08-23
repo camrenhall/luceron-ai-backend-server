@@ -4,6 +4,7 @@ Documents service - business logic for document and document analysis management
 
 import logging
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 from services.base_service import BaseService, ServiceResult
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class DocumentsService(BaseService):
         """Get all documents for a specific case"""
         return await self.get_by_field("case_id", case_id)
     
-    async def get_documents_by_status(self, status: str, limit: int = 100) -> ServiceResult:
+    async def get_documents_by_status(self, status: str, limit: int = 50) -> ServiceResult:
         """Get documents by processing status"""
         return await self.get_by_field("status", status, limit)
     
@@ -149,7 +150,7 @@ class DocumentAnalysisService(BaseService):
             "analysis_content": analysis_content,
             "model_used": model_used,
             "analysis_status": analysis_status,
-            "analyzed_at": "NOW()",  # Will be handled by SQL
+            "analyzed_at": datetime.utcnow(),
             "context_summary_created": False
         }
         
@@ -168,13 +169,13 @@ class DocumentAnalysisService(BaseService):
     
     async def get_analyses_by_document(self, document_id: str) -> ServiceResult:
         """Get all analyses for a specific document"""
-        return await self.get_by_field("document_id", document_id)
+        return await self.get_by_field("document_id", document_id, 50)
     
     async def get_analyses_by_case(self, case_id: str) -> ServiceResult:
         """Get all analyses for a specific case"""
-        return await self.get_by_field("case_id", case_id)
+        return await self.get_by_field("case_id", case_id, 50)
     
-    async def get_analyses_by_status(self, status: str, limit: int = 100) -> ServiceResult:
+    async def get_analyses_by_status(self, status: str, limit: int = 50) -> ServiceResult:
         """Get analyses by status"""
         return await self.get_by_field("analysis_status", status, limit)
     

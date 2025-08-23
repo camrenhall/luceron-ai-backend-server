@@ -39,7 +39,8 @@ class RestClient:
         """Get valid OAuth access token - matches get_auth_token.py pattern exactly"""
         if self._cached_token is None or self._cached_token.is_expired():
             # Generate JWT client assertion - EXACT pattern from get_auth_token.py
-            now = datetime.utcnow()  # Use utcnow() to match working implementation
+            # Use timezone-naive datetime to match server expectations
+            now = datetime.utcnow()
             payload = {
                 'iss': self.config.oauth_service_id,
                 'sub': self.config.oauth_service_id,
@@ -97,11 +98,20 @@ class RestClient:
             
             # Parse response
             try:
-                result = response.json()
+                parsed_response = response.json()
             except:
-                result = {"raw_response": response.text}
+                parsed_response = {"raw_response": response.text}
             
-            result["_status_code"] = response.status_code
-            result["_success"] = response.status_code < 400
+            # Handle both dict and list responses by wrapping in consistent format
+            if isinstance(parsed_response, list):
+                result = {
+                    "data": parsed_response,
+                    "_status_code": response.status_code,
+                    "_success": response.status_code < 400
+                }
+            else:
+                result = parsed_response
+                result["_status_code"] = response.status_code
+                result["_success"] = response.status_code < 400
             
             return result

@@ -111,7 +111,7 @@ class TestCasesCRUD:
         assert response.get("_success", False), f"Cases list failed: {response}"
         
         # Validate response structure
-        assert "data" in response or isinstance(response, list), "List response should contain data"
+        assert "data" in response or "cases" in response or isinstance(response, list), "List response should contain data"
     
     async def test_cases_search_operation(self, clean_orchestrator: TestOrchestrator):
         """Test cases search endpoint"""

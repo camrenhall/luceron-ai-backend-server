@@ -226,9 +226,9 @@ class TestOrchestrator:
     
     def _extract_uuid(self, response: Dict[str, Any]) -> Optional[str]:
         """Extract UUID from API response - handles various response formats"""
-        # Common UUID field names
-        uuid_fields = ['id', 'case_id', 'document_id', 'communication_id', 
-                      'conversation_id', 'message_id', 'summary_id', 'context_id', 'error_id']
+        # Common UUID field names - ordered by specificity (most specific first)
+        uuid_fields = ['message_id', 'summary_id', 'context_id', 'document_id', 'communication_id', 
+                      'conversation_id', 'case_id', 'error_id', 'id']
         
         # Try direct fields first
         for field in uuid_fields:

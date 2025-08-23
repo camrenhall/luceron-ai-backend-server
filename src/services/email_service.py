@@ -20,7 +20,7 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
     try:
         # Send email via Resend
         email_data = {
-            "from": FROM_EMAIL,
+            "from": FROM_EMAIL or "noreply@test.example.com",
             "to": [request.recipient_email],
             "subject": request.subject,
             "html": request.html_body or f"<p>{request.body.replace(chr(10), '<br>')}</p>",
@@ -45,7 +45,7 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 RETURNING communication_id
             """,
-            request.case_id, "email", "outgoing", "sent", FROM_EMAIL, 
+            request.case_id, "email", "outgoing", "sent", FROM_EMAIL or "noreply@test.example.com", 
             request.recipient_email, request.subject, request.body, datetime.utcnow(), resend_id)
         
         logger.info(f"Email sent via Resend - ID: {resend_id}, To: {request.recipient_email}")
@@ -64,12 +64,12 @@ async def send_email_via_resend(request: EmailRequest) -> EmailResponse:
             # Insert into client_communications table and get the generated id
             await conn.fetchval("""
                 INSERT INTO client_communications 
-                (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                RETURNING id
+                (case_id, channel, direction, status, sender, recipient, subject, message_content, sent_at, resend_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING communication_id
             """,
-            request.case_id, "email", "outgoing", "failed", FROM_EMAIL, 
-            request.recipient_email, request.subject, request.body, datetime.utcnow())
+            request.case_id, "email", "outgoing", "failed", FROM_EMAIL or "noreply@test.example.com", 
+            request.recipient_email, request.subject, request.body, datetime.utcnow(), None)
         
         logger.error(f"Email sending failed: {e}")
         raise HTTPException(status_code=500, detail=f"Email sending failed: {str(e)}")

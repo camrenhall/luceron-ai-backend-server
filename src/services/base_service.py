@@ -415,11 +415,22 @@ class BaseService:
                 rows = await conn.fetch(query, *params)
                 data = [dict(row) for row in rows]
                 
-                # Convert datetime objects to ISO strings
+                # Convert datetime objects to ISO strings and deserialize JSONB fields
+                table_name = self._get_table_name(operation.resource)
+                jsonb_fields = self._get_jsonb_fields(table_name)
+                
                 for row in data:
                     for key, value in row.items():
                         if hasattr(value, 'isoformat'):
                             row[key] = value.isoformat()
+                        elif key in jsonb_fields and isinstance(value, str):
+                            # Deserialize JSONB fields back to dictionaries
+                            import json
+                            try:
+                                row[key] = json.loads(value)
+                            except (json.JSONDecodeError, TypeError):
+                                # If it's not valid JSON, keep it as string
+                                pass
                 
                 # Build pagination info
                 page_info = None
@@ -463,11 +474,22 @@ class BaseService:
                     
                     data = [dict(row)]
                     
-                    # Convert datetime objects to ISO strings
+                    # Convert datetime objects to ISO strings and deserialize JSONB fields
+                    table_name = self._get_table_name(operation.resource)
+                    jsonb_fields = self._get_jsonb_fields(table_name)
+                    
                     for row_dict in data:
                         for key, value in row_dict.items():
                             if hasattr(value, 'isoformat'):
                                 row_dict[key] = value.isoformat()
+                            elif key in jsonb_fields and isinstance(value, str):
+                                # Deserialize JSONB fields back to dictionaries
+                                import json
+                                try:
+                                    row_dict[key] = json.loads(value)
+                                except (json.JSONDecodeError, TypeError):
+                                    # If it's not valid JSON, keep it as string
+                                    pass
                     
                     # Double-check: verify record exists in database
                     table_name = self._get_table_name(operation.resource)
@@ -522,6 +544,16 @@ class BaseService:
         }
         return id_fields.get(resource, "id")
     
+    def _get_jsonb_fields(self, table_name: str) -> set:
+        """Get JSONB field names for table that need JSON serialization"""
+        jsonb_fields_map = {
+            "agent_messages": {"content", "function_arguments", "function_response"},
+            "agent_context": {"context_value"},
+            "document_analysis": {"analysis_content"},
+            "error_logs": {"context"},
+        }
+        return jsonb_fields_map.get(table_name, set())
+    
     async def _execute_update_sql(self, dsl: DSL) -> Dict[str, Any]:
         """Execute UPDATE DSL directly via SQL"""
         operation = dsl.get_primary_operation()
@@ -545,11 +577,22 @@ class BaseService:
                     
                     data = [dict(row)]
                     
-                    # Convert datetime objects to ISO strings
+                    # Convert datetime objects to ISO strings and deserialize JSONB fields
+                    table_name = self._get_table_name(operation.resource)
+                    jsonb_fields = self._get_jsonb_fields(table_name)
+                    
                     for row_dict in data:
                         for key, value in row_dict.items():
                             if hasattr(value, 'isoformat'):
                                 row_dict[key] = value.isoformat()
+                            elif key in jsonb_fields and isinstance(value, str):
+                                # Deserialize JSONB fields back to dictionaries
+                                import json
+                                try:
+                                    row_dict[key] = json.loads(value)
+                                except (json.JSONDecodeError, TypeError):
+                                    # If it's not valid JSON, keep it as string
+                                    pass
                     
                     return {
                         "data": data,
@@ -694,9 +737,18 @@ class BaseService:
         field_names = list(operation.values.keys())
         field_placeholders = []
         
-        for value in operation.values.values():
+        # Define JSONB fields that need JSON serialization
+        jsonb_fields = self._get_jsonb_fields(table_name)
+        
+        for field_name, value in operation.values.items():
             field_placeholders.append(f"${param_counter}")
-            params.append(value)
+            
+            # Handle JSONB fields - serialize dictionaries to JSON strings
+            if field_name in jsonb_fields and isinstance(value, dict):
+                import json
+                params.append(json.dumps(value))
+            else:
+                params.append(value)
             param_counter += 1
         
         # Add created_at if not provided (auto-managed)
@@ -734,9 +786,17 @@ class BaseService:
         
         # SET clause
         set_parts = []
+        jsonb_fields = self._get_jsonb_fields(table_name)
+        
         for field_name, value in operation.update.items():
             set_parts.append(f"{field_name} = ${param_counter}")
-            params.append(value)
+            
+            # Handle JSONB fields - serialize dictionaries to JSON strings
+            if field_name in jsonb_fields and isinstance(value, dict):
+                import json
+                params.append(json.dumps(value))
+            else:
+                params.append(value)
             param_counter += 1
         
         query = f"UPDATE {table_name} SET {', '.join(set_parts)}"
