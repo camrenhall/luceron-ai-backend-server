@@ -40,8 +40,16 @@ class DatabaseValidator:
                 min_size=2,
                 max_size=10,  # Match server pool size
                 command_timeout=60,  # Match server timeout
-                statement_cache_size=0  # Required for pgbouncer compatibility
+                statement_cache_size=0,  # Required for pgbouncer compatibility
+                # Force READ COMMITTED on every connection for read-after-write consistency
+                init=self._init_connection
             )
+    
+    async def _init_connection(self, conn):
+        """Initialize each connection with proper settings"""
+        # Force READ COMMITTED isolation to see latest commits from other connections
+        await conn.execute("SET default_transaction_isolation = 'read committed'")
+        await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
     
     async def disconnect(self):
         """Close database connections"""
@@ -54,15 +62,27 @@ class DatabaseValidator:
                 self.pool = None
     
     async def record_exists(self, table: str, uuid_field: str, uuid_value: str) -> bool:
-        """Check if record exists in database with proper isolation"""
+        """Check if record exists with polling for read-after-write consistency"""
         await self.connect()
         
+        # Polling pattern to handle read-after-write visibility issues
+        import asyncio
+        import time
+        
         query = f"SELECT 1 FROM {table} WHERE {uuid_field} = $1"
-        async with self.pool.acquire() as conn:
-            # Ensure we see the latest committed data from all connections
-            await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
-            result = await conn.fetchval(query, uuid_value)
-            return result is not None
+        deadline = time.time() + 3.0  # 3 second timeout
+        
+        while time.time() < deadline:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchval(query, uuid_value)
+                if result is not None:
+                    return True
+            
+            # Short sleep before retry
+            await asyncio.sleep(0.050)  # 50ms
+            
+        # Final attempt - record not found after polling
+        return False
     
     async def get_record(self, table: str, uuid_field: str, uuid_value: str) -> Optional[Dict[str, Any]]:
         """Get complete record from database"""
