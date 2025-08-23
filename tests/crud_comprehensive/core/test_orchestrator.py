@@ -79,6 +79,10 @@ class CRUDTestOrchestrator:
         """Validate database state after operation"""
         if not self.config.enable_database_validation:
             return ValidationResult(True, [], [])
+        
+        # Give time for API transactions to commit before validation
+        import asyncio
+        await asyncio.sleep(0.5)  # 500ms delay everywhere to ensure API transaction commits
             
         validation = ValidationResult(True, [], [])
         

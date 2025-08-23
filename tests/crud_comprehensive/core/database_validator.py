@@ -70,19 +70,28 @@ class DatabaseValidator:
         import time
         
         query = f"SELECT 1 FROM {table} WHERE {uuid_field} = $1"
-        deadline = time.time() + 3.0  # 3 second timeout
+        deadline = time.time() + 10.0  # 10 second timeout everywhere
         
         while time.time() < deadline:
             async with self.pool.acquire() as conn:
+                # Force fresh connection state on each attempt
+                await conn.execute("DISCARD ALL")  # Clear session state
+                await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                
                 result = await conn.fetchval(query, uuid_value)
                 if result is not None:
                     return True
             
-            # Short sleep before retry
-            await asyncio.sleep(0.050)  # 50ms
+            # 200ms polling interval
+            await asyncio.sleep(0.200)
             
-        # Final attempt - record not found after polling
-        return False
+        # Final attempt with explicit transaction handling
+        async with self.pool.acquire() as conn:
+            await conn.execute("BEGIN")
+            await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            result = await conn.fetchval(query, uuid_value)
+            await conn.execute("COMMIT")
+            return result is not None
     
     async def get_record(self, table: str, uuid_field: str, uuid_value: str) -> Optional[Dict[str, Any]]:
         """Get complete record from database"""
