@@ -46,6 +46,7 @@ class ContractField(BaseModel):
     pii: bool = False
     readable: bool = True
     writable: bool = False
+    enum_values: Optional[List[str]] = None  # Valid enum values if applicable
 
 
 class ContractLimits(BaseModel):

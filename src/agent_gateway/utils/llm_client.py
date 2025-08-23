@@ -181,6 +181,8 @@ Critical Rules:
 - Use proper data types for values
 - Only reference resources from: {resources}
 - For UPDATE, identify the primary key field (usually ends with _id)
+- For fields with enum_values, ONLY use the exact values listed (case-sensitive)
+- If required fields are not specified in natural language, use reasonable defaults from enum_values
 
 Respond with valid JSON DSL only, no explanations."""
 

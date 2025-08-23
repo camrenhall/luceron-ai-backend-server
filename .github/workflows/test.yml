@@ -82,7 +82,11 @@ jobs:
       run: |
         cd tests/crud_comprehensive
         pip install -r requirements.txt
-        python runners/unified_runner.py --mode smoke --db-mode isolated --output json --verbose
+        python runners/unified_runner.py --mode smoke --db-mode isolated --output json --verbose || {
+          echo "Tests failed, showing detailed pytest output:"
+          cat test-results.json 2>/dev/null || echo "No test results file found"
+          exit 1
+        }
     
     - name: Cleanup test containers
       if: always()

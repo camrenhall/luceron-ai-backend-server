@@ -99,7 +99,8 @@ class Planner:
                         "type": field.type.value,
                         "nullable": field.nullable,
                         "readable": field.readable,
-                        "writable": field.writable
+                        "writable": field.writable,
+                        "enum_values": field.enum_values
                     }
                     for field in contract.fields
                     if field.readable  # Only show readable fields

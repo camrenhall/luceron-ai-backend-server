@@ -50,7 +50,8 @@ def get_cases_contract(role: str = "default") -> ResourceContract:
             nullable=False,
             pii=False,
             readable=True,
-            writable=True
+            writable=True,
+            enum_values=["OPEN", "CLOSED"]
         ),
         ContractField(
             name="created_at",
