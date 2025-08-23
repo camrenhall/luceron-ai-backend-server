@@ -1,0 +1,50 @@
+{
+  "luceron_ai_communications_agent": {
+    "service_id": "luceron_ai_communications_agent",
+    "service_name": "Luceron AI Communications Agent",
+    "agent_role": "communications_agent",
+    "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1CZnh/+2q/omrDOyG5no\nNNsLMLe3dbDBL37FL/7x8P0iwdXE8IthlTSse0a0yVpEecrrs3BjshAGM5+4zoDd\n7DNasgPidH5j3mnNsO2m4wYvUUqbfhwCg/tzuEfvPYYY0eeQzXvAzUcgaX/ADN2V\n+q5EI5O7xWF3G/KQheXB8D9ZhZSCuaC6Ql9c2OvqYxbdn5BNR0XkjEA1VFPx9DwT\nbNEiyxHXIqhZ2fjGQGaYo8LcJLLBfPM4AjT9KOfQiq/l/L9W3RGiWyWbyCC4ZWpQ\nAGRkIn5h+mar2yxRh8VhXuytDKgk+Q+YdNMe9tSmxdmp0HAbU/XC5jRIpshmZuuFs\nBQIDAQAB\n-----END PUBLIC KEY-----\n",
+    "is_active": true,
+    "created_at": "2025-08-22T16:38:19.572574"
+  },
+  "luceron_ai_analysis_agent": {
+    "service_id": "luceron_ai_analysis_agent",
+    "service_name": "Luceron AI Analysis Agent",
+    "agent_role": "analysis_agent",
+    "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0BuDvvwb3ihsihayek9b\nTV2XEsjMetTsz33BfIf1F7bvHlWdXDVxcMQuMTFI2hSkBt7rwfP9XCQTCk0z1HAM\nBz6lxygMKLRfXmAPb+QvwrxiNnG6kH3evvA5QAbus4m9SjI9C1/jErsI077qsJxm\nFtOwTzQaHcn4WQQi/58vW5IaaRFscn0RaMZsLJRCGWTBLBa1CMAPxOTwCB5t9pec\nvns6YpvRCu/etc5v098FE56gsGGGzcubuCBaoUEn+Kt2A7FZIu8l0x9gJHLbISpj\nIC1S39YXJNHt4UpO+j7TA5M+zVxvcFVrDK7XsklekzQX3HwI2VcRlolfGuR2tTG4\ndwIDAQAB\n-----END PUBLIC KEY-----\n",
+    "is_active": true,
+    "created_at": "2025-08-22T17:14:34.137798"
+  },
+  "luceron_ai_manager_agent": {
+    "service_id": "luceron_ai_manager_agent",
+    "service_name": "Luceron AI Manager Agent",
+    "agent_role": "manager_agent",
+    "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvIO9/G/IICthqvNaQA4x\nX2EabrYArW2gf07i6dK9n+rbCixG1dMprgUZ4Zpawi6kj1oz6sEAM9HUbvMM3uCo\nUu9eRwHH5iprmhdc9MHwwqK6/WDlwxUcQrYGcattg9uTf9RD+TNdcdYDFFUVAuN/\nqSl3bslfyVDr+7iwa5okakj1Tc/Em7xws/2bogFTYwVmCLoqQwqqMcQLc0ChFiQ6\nH8yLGHO29HZPcyAbZmkLO1rpMq8mQBc3xeNf32Hl5bjh+u8YRbdj28onhU8nbp1G\nZd9Y4x7xFYuXDrwc500ZzH2ajKAy72b40KCLn+CFOcD+aZ9HLM0zXG2a0chU6wzd\n0QIDAQAB\n-----END PUBLIC KEY-----\n",
+    "is_active": true,
+    "created_at": "2025-08-22T17:14:42.901601"
+  },
+  "aws_document_lambdas": {
+    "service_id": "aws_document_lambdas",
+    "service_name": "AWS Document Processing Lambdas",
+    "agent_role": "aws_document_lambdas",
+    "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4I008INMAgyr3pVEqdd7\nD7J+kY2s/g9BKiLTZjUrAzmiEgk97YoVgppZ/RVNdAMp0swplprARK7JwucjG1c/\nXDBBPEH0UO1zOG/nS+eVLvrvIqGhaqNWPuaIo8dhWSPKSBN0Q/O3z2rutMaXWThi\nHFKWrag7sasQdQCItMW288z3I6/5dk78CCRodeQcL05SLhFLFJVr47PTqdFHglm9\nL1EtWxe8UPy+z+upouswZSh/6TVURf8y+0lMj2nB2TAt+GUSp/V4vXqPYVui+4oQ\nDkuKT7s8ZtcX7tkuzMYjJZlonRg0h/ugI1H+xICmUP0NdTbhl/gxT1gArzRA+Vmz\nHQIDAQAB\n-----END PUBLIC KEY-----\n",
+    "is_active": true,
+    "created_at": "2025-08-22T17:31:02.045683"
+  },
+  "camren_master": {
+    "service_id": "camren_master",
+    "service_name": "Camren Master Access",
+    "agent_role": "camren_master",
+    "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApJvn/ixmQD0U2vBqN+Ed\neYmhm1g8FTGOkHeaK/cOlCG7P7zEVxP8tv0otGQPepw+ftico2dLHwXH6ejuypfZ\nBLZjVp7egW3VZRGw5uXwaWx2Vxl/3bSZ5YAgLkGbqxds674xPlkJsUtZ1+XTFyi2\nU6yK+5cvfTbP2oDT9YS+fTgYwWDaLkn2RVZ93EALa3zJ/8R3LAVkOIPSL+E/VM4X\nQY2UjbMFQkzWrN5p3naygUV9y6Yv11RZyQmBE12CtqvZDX27E2u1+9fMlHUSp6i5\ntbawv3j1ZrGbcliI5tTUMm93iCk7GRSYoU+Z4Qa3CXPq3gczW7yCcEDwybSwutam\n2QIDAQAB\n-----END PUBLIC KEY-----\n",
+    "is_active": true,
+    "created_at": "2025-08-22T17:42:57.629056"
+  },
+  "gcp_cloud_functions": {
+    "service_id": "gcp_cloud_functions",
+    "service_name": "GCP Cloud Functions Alert Service",
+    "agent_role": "gcp_cloud_functions",
+    "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArOvMrN125kyRfEHkY8zm\nQ+4V5M8eFYGbP9FsaAi+TvIyZvC1xSK0EJVGTImMevix28NNZTJLhC/8b1zcKW+b\ne4GNIZoLis2VqSxDo6g2OKQun3e3w4rl8dYJaK6lauKn4u+CANr+smwm/H4GlNTQ\nMEnisJRh7Wfq6d1117XF/1DG1CXyUU2GvmBF/sDv9BIQMj/GIIsn/Zkdfhq+MhJN\nwCNGOj3ZoD3hEAJIg0xUj161XZW5kFmzwbJOl/guHnjzJMG1tf1lFujy7A0FLAIf\nlsKzJywL574J3GRp3VDByEDQH96x/tI0w7NyNsMl7AX6sF9k2RDtxmm6y/zffpOH\naQIDAQAB\n-----END PUBLIC KEY-----\n",
+    "is_active": true,
+    "created_at": "2025-08-22T18:58:18.987130"
+  }
+}

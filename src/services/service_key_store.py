@@ -39,7 +39,7 @@ class ServiceKeyStore:
     Uses JSON file storage for MVP - can be easily replaced with Redis/DynamoDB later
     """
     
-    def __init__(self, storage_path: str = "data/service_keys.json"):
+    def __init__(self, storage_path: str = "src/config/service_keys.json"):
         self.storage_path = Path(storage_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_storage_exists()

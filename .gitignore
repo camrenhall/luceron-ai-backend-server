@@ -208,4 +208,3 @@ __marimo__/
 
 # OAuth2 Service Security - NEVER commit private keys
 provisioned_services/
-data/service_keys.json
