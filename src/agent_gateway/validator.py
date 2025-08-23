@@ -293,8 +293,8 @@ class Validator:
                     resource=operation.resource
                 )
             
-            # Validate field value type
-            error = self._validate_field_value(field_name, field.type, value, operation.resource)
+            # Validate field value type and enum constraints
+            error = self._validate_field_value(field_name, field, value, operation.resource)
             if error:
                 return error
         
@@ -344,8 +344,8 @@ class Validator:
                     resource=operation.resource
                 )
             
-            # Validate field value type
-            error = self._validate_field_value(field_name, field.type, value, operation.resource)
+            # Validate field value type and enum constraints
+            error = self._validate_field_value(field_name, field, value, operation.resource)
             if error:
                 return error
         
@@ -420,15 +420,15 @@ class Validator:
                     resource=contract.resource
                 )
             
-            # Basic type validation
-            error = self._validate_field_value(field_name, field.type, value, contract.resource)
+            # Basic type validation and enum checking
+            error = self._validate_field_value(field_name, field, value, contract.resource)
             if error:
                 return error
         
         return None
     
-    def _validate_field_value(self, field_name: str, field_type, value, resource: str) -> Optional[ValidationError]:
-        """Validate field value matches expected type"""
+    def _validate_field_value(self, field_name: str, field, value, resource: str) -> Optional[ValidationError]:
+        """Validate field value matches expected type and enum constraints"""
         
         # Basic type checking - can be extended
         from agent_gateway.contracts.base import FieldType
@@ -436,6 +436,16 @@ class Validator:
         if value is None:
             return None  # NULL values handled by nullable flag
         
+        # Check enum values first if they exist
+        if field.enum_values and value not in field.enum_values:
+            return ValidationError(
+                error_type="INVALID_QUERY",
+                message=f"Invalid value for field {field_name}: '{value}'. Valid options are: {', '.join(field.enum_values)}",
+                field=field_name,
+                resource=resource
+            )
+        
+        field_type = field.type
         try:
             if field_type == FieldType.UUID:
                 import uuid
