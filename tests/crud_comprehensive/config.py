@@ -15,16 +15,27 @@ load_dotenv()
 class TestConfig:
     """Central configuration for CRUD testing suite"""
     
-    # Database Connection - Supabase Connection Pooler
+    # Database Connection Configuration (Pooling Connection)
     database_url: str = os.getenv('DATABASE_URL', 'postgresql://postgres.bjooglksafuxdeknpaso:SgUHEBQv5vdWG0pF@aws-0-us-east-2.pooler.supabase.com:6543/postgres')
     
-    # API Endpoints  
-    api_base_url: str = os.getenv('AGENT_DB_BASE_URL', 'https://luceron-ai-backend-server-909342873358.us-central1.run.app')
+    # Database Testing Mode
+    database_mode: str = os.getenv('DB_MODE', 'isolated')  # isolated, production, hybrid
+    test_db_engine: str = os.getenv('TEST_DB_ENGINE', 'docker')  # docker, embedded
     
-    # OAuth Configuration
-    oauth_service_id: str = os.getenv('OAUTH_SERVICE_ID', 'camren_master')
+    # Schema Change Detection
+    fail_on_schema_changes: bool = os.getenv('FAIL_ON_SCHEMA_CHANGES', 'true').lower() == 'true'
+    schema_validation_enabled: bool = os.getenv('SCHEMA_VALIDATION', 'true').lower() == 'true'
+    
+    # API Endpoints - Default to local test container
+    api_base_url: str = os.getenv('TEST_API_BASE_URL', 'http://localhost:8080')
+    
+    # OAuth Configuration (for test API container)
+    oauth_service_id: str = os.getenv('OAUTH_SERVICE_ID', 'test_service')
     oauth_private_key: str = os.getenv('OAUTH_PRIVATE_KEY', '')
-    oauth_audience: str = os.getenv('OAUTH_AUDIENCE', 'luceron-auth-server')
+    oauth_audience: str = os.getenv('OAUTH_AUDIENCE', 'test-auth-server')
+    
+    # Email Service - Always use dummy key for testing
+    resend_api_key: str = "dummy_resend_key_for_testing"
     
     # Performance Thresholds (seconds)
     create_operation_threshold: float = float(os.getenv('CREATE_THRESHOLD', '3.0'))

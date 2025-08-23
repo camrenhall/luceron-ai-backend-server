@@ -70,8 +70,8 @@ class DataFactory:
             "channel": "EMAIL",
             "direction": "OUTBOUND",
             "status": "sent",
-            "sender": f"test.sender@{self.config.test_data_prefix.lower()}.example.com",
-            "recipient": f"test.recipient@{self.config.test_data_prefix.lower()}.example.com",
+            "sender": f"test.sender@{self.config.test_data_prefix.lower().replace('_', '-')}.example.com",
+            "recipient": f"test.recipient@{self.config.test_data_prefix.lower().replace('_', '-')}.example.com",
             "subject": f"Test Communication - {self.fake.sentence()}",
             "message_content": f"Test message content: {self.fake.paragraph()}"
         }

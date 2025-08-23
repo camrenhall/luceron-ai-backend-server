@@ -41,11 +41,11 @@ class TestCrossTableOperations:
         # Step 3: Add analysis to documents
         for doc_id in document_ids:
             analysis_data = {
-                "analysis_content": {
-                    "summary": f"Analysis for document {doc_id}",
-                    "findings": ["Key point 1", "Key point 2"]
-                },
+                "document_id": doc_id,
+                "case_id": case_id,
+                "analysis_content": f'{{"summary": "Analysis for document {doc_id}", "findings": ["Key point 1", "Key point 2"]}}',
                 "model_used": "gpt-4-turbo",
+                "analysis_status": "COMPLETED",
                 "tokens_used": 120
             }
             
@@ -58,9 +58,8 @@ class TestCrossTableOperations:
                 )
             )
             
-            # Analysis might not be available - skip if not implemented
-            if not response.get("_success", False):
-                pytest.skip("Document analysis endpoint not available")
+            # Analysis endpoint should be available
+            assert response.get("_success"), f"Document analysis failed: {response}"
         
         # Step 4: Validate case has associated data
         case_comm_response, _ = await orch.time_operation(

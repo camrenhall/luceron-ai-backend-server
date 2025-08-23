@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Template for test PostgreSQL instances
+  # Actual instances are created dynamically by TestDatabaseManager
+  test-postgres-template:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${TEST_DB_NAME:-test_db}
+      POSTGRES_USER: ${TEST_DB_USER:-test_user}
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD:-test_pass}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    # Use tmpfs for maximum speed (in-memory database)
+    tmpfs:
+      - /var/lib/postgresql/data:rw,noexec,nosuid,size=256m
+    ports:
+      - "${TEST_DB_PORT:-5433}:5432"
+    # Health check to ensure database is ready
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEST_DB_USER:-test_user} -d ${TEST_DB_NAME:-test_db}"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Resource limits for CI environments
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    # Auto-remove when stopped
+    restart: "no"
+    
+  # Multi-database setup for parallel testing
+  test-postgres-1:
+    extends: test-postgres-template
+    environment:
+      POSTGRES_DB: test_db_1
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+    ports:
+      - "5433:5432"
+    container_name: crud_test_db_1
+    
+  test-postgres-2:
+    extends: test-postgres-template
+    environment:
+      POSTGRES_DB: test_db_2
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+    ports:
+      - "5434:5432"
+    container_name: crud_test_db_2
+    
+  test-postgres-3:
+    extends: test-postgres-template
+    environment:
+      POSTGRES_DB: test_db_3
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+    ports:
+      - "5435:5432"
+    container_name: crud_test_db_3
+
+# Networks for isolation
+networks:
+  test-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

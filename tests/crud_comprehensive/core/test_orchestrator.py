@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.rest_client import RestClient
 from core.database_validator import DatabaseValidator, ValidationResult
 from core.data_factory import DataFactory
+from core.performance_tracker import PerformanceTracker
 from config import get_config
 
 
@@ -51,6 +52,7 @@ class TestOrchestrator:
         self.rest_client = RestClient()
         self.db_validator = DatabaseValidator()
         self.data_factory = DataFactory()
+        self.performance_tracker = PerformanceTracker()
         self.results: List[TestResult] = []
         
     async def setup(self):
@@ -137,6 +139,15 @@ class TestOrchestrator:
             uuid=uuid_value
         )
         
+        # Track performance metrics
+        self.performance_tracker.record_test_result(
+            test_name=f"{resource}_crud_cycle",
+            operation="CREATE",
+            resource=resource,
+            duration=duration,
+            success=success
+        )
+        
         self.results.append(result)
         return result
     
@@ -163,6 +174,15 @@ class TestOrchestrator:
             errors=errors,
             warnings=warnings,
             uuid=uuid_value
+        )
+        
+        # Track performance metrics
+        self.performance_tracker.record_test_result(
+            test_name=f"{resource}_crud_cycle",
+            operation="READ",
+            resource=resource,
+            duration=duration,
+            success=success
         )
         
         self.results.append(result)
@@ -193,6 +213,15 @@ class TestOrchestrator:
             uuid=uuid_value
         )
         
+        # Track performance metrics
+        self.performance_tracker.record_test_result(
+            test_name=f"{resource}_crud_cycle",
+            operation="UPDATE",
+            resource=resource,
+            duration=duration,
+            success=success
+        )
+        
         self.results.append(result)
         return result
     
@@ -219,6 +248,15 @@ class TestOrchestrator:
             errors=errors,
             warnings=warnings,
             uuid=uuid_value
+        )
+        
+        # Track performance metrics
+        self.performance_tracker.record_test_result(
+            test_name=f"{resource}_crud_cycle",
+            operation="DELETE",
+            resource=resource,
+            duration=duration,
+            success=success
         )
         
         self.results.append(result)

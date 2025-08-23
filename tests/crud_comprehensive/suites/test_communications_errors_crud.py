@@ -46,9 +46,8 @@ class TestClientCommunicationsCRUD:
             data=email_data
         )
         
-        # Email might not be configured in test environment - allow graceful failure
-        if not create_result.success:
-            pytest.skip("Email service not available in test environment")
+        # Email service should work with fixed data format
+        assert create_result.success, f"Email service failed: {create_result.errors}"
         
         # If email succeeded, verify communication was logged
         if create_result.success:
