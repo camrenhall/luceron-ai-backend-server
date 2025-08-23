@@ -157,6 +157,10 @@ class CRUDTestOrchestrator:
             uuid_value = self._extract_uuid(response)
             if not uuid_value:
                 warnings.append("Could not extract UUID from response")
+            
+            # Ensure transaction is committed for subsequent operations (CI environment timing)
+            import asyncio
+            await asyncio.sleep(0.1)
                 
         result = TestResult(
             operation="CREATE",
