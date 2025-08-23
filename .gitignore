@@ -2,6 +2,7 @@
 __pycache__/
 *.py[codz]
 *$py.class
+get_auth_token.py
 
 # C extensions
 *.so

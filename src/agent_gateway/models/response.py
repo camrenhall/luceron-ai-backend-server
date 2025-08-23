@@ -32,7 +32,7 @@ class AgentDbResponse(BaseModel):
     data: List[Dict[str, Any]] = []  # Post-image rows (READ or WRITE)
     count: int = 0  # READ: rows returned; WRITE: rows affected
     page: Optional[ResponsePagination] = None  # Present only on read when used
-    error: Optional[ResponseError] = None
+    error_details: Optional[ResponseError] = None
 
     @classmethod
     def success(
@@ -64,7 +64,7 @@ class AgentDbResponse(BaseModel):
         """Create error response"""
         return cls(
             ok=False,
-            error=ResponseError(
+            error_details=ResponseError(
                 type=error_type,
                 message=message,
                 clarification=clarification,

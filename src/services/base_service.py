@@ -584,6 +584,13 @@ class BaseService:
         
         params = []
         
+        # Convert date strings to datetime objects for date/timestamp fields
+        if isinstance(value, str) and self._is_date_field(field):
+            logger.info(f"Converting date field '{field}' with value '{value}'")
+            converted_value = self._parse_date_string(value)
+            logger.info(f"Converted '{value}' to {converted_value} (type: {type(converted_value)})")
+            value = converted_value
+        
         if op == "=":
             sql = f"{field} = ${param_counter}"
             params.append(value)
@@ -627,3 +634,61 @@ class BaseService:
             raise ValueError(f"Unsupported WHERE operator: {op}")
         
         return sql, params, param_counter
+    
+    def _is_date_field(self, field_name: str) -> bool:
+        """Check if a field is a date/timestamp field that needs conversion"""
+        # Common date field patterns
+        date_field_patterns = [
+            'created_at', 'updated_at', 'date', 'timestamp', 'time',
+            '_at', '_date', '_time', 'expires_at', 'opened_at'
+        ]
+        
+        field_lower = field_name.lower()
+        
+        # Check if field name matches common patterns
+        for pattern in date_field_patterns:
+            if pattern in field_lower:
+                logger.info(f"Field '{field_name}' identified as date field (matches pattern '{pattern}')")
+                return True
+        
+        # Check field type from contract if available
+        field_def = self.contract.get_field(field_name)
+        if field_def:
+            from agent_gateway.contracts.base import FieldType
+            return field_def.type in [FieldType.DATE, FieldType.TIMESTAMP]
+        
+        return False
+    
+    def _parse_date_string(self, date_string: str):
+        """Convert date string to appropriate datetime object for PostgreSQL"""
+        from datetime import datetime, date
+        import re
+        
+        try:
+            # Handle various date formats
+            date_string = date_string.strip()
+            
+            # ISO date format: YYYY-MM-DD
+            if re.match(r'^\d{4}-\d{2}-\d{2}$', date_string):
+                return datetime.strptime(date_string, '%Y-%m-%d').date()
+            
+            # ISO datetime format: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM:SS
+            if 'T' in date_string or ' ' in date_string:
+                # Handle timezone info
+                if date_string.endswith('Z'):
+                    date_string = date_string[:-1] + '+00:00'
+                
+                # Try parsing as full datetime
+                for fmt in ['%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S']:
+                    try:
+                        return datetime.strptime(date_string.replace('+00:00', ''), fmt.replace('%z', ''))
+                    except ValueError:
+                        continue
+            
+            # If all else fails, try parsing as date only
+            return datetime.strptime(date_string, '%Y-%m-%d').date()
+            
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Failed to parse date string '{date_string}': {e}")
+            # Return the original value if parsing fails
+            return date_string
