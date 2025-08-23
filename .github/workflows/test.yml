@@ -39,6 +39,11 @@ jobs:
           -e DATABASE_URL="${{ secrets.QA_DATABASE_URL }}" \
           -e RESEND_API_KEY="dummy_resend_key_for_testing" \
           -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
+          -e FROM_EMAIL="test@luceron.ai" \
+          -e ALERT_FROM_EMAIL="test@luceron.ai" \
+          -e ADMIN_ALERT_EMAILS="test@luceron.ai" \
+          -e RESEND_WEBHOOK_SECRET="dummy_webhook_secret" \
+          -e PORT="8080" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
           -e ENABLE_EXTERNAL_APIS="false" \
@@ -47,8 +52,33 @@ jobs:
           -p 8080:8080 \
           luceron-api:test
         
-        # Wait for API to be ready
-        timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
+        # Check container status
+        echo "Container status:"
+        docker ps -a
+        echo "Container logs:"
+        docker logs test-api
+        
+        # Wait for API to be ready with more verbose output
+        echo "Waiting for API to be ready..."
+        for i in {1..30}; do
+          # Try multiple endpoints to find one that works
+          if curl -f -s http://localhost:8080/health 2>/dev/null || \
+             curl -f -s http://localhost:8080/ 2>/dev/null || \
+             curl -f -s http://localhost:8080/docs 2>/dev/null; then
+            echo "API is ready!"
+            break
+          else
+            echo "Attempt $i: API not ready, waiting 2 seconds..."
+            docker logs test-api | tail -10
+            sleep 2
+          fi
+        done
+        
+        # Final status check
+        echo "Final container status:"
+        docker ps -a
+        echo "Final container logs:"
+        docker logs test-api
     
     - name: Run smoke tests (QA Database)
       env:
@@ -118,6 +148,11 @@ jobs:
           -e DATABASE_URL="${{ secrets.QA_DATABASE_URL }}" \
           -e RESEND_API_KEY="dummy_resend_key_for_testing" \
           -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
+          -e FROM_EMAIL="test@luceron.ai" \
+          -e ALERT_FROM_EMAIL="test@luceron.ai" \
+          -e ADMIN_ALERT_EMAILS="test@luceron.ai" \
+          -e RESEND_WEBHOOK_SECRET="dummy_webhook_secret" \
+          -e PORT="8080" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
           -e ENABLE_EXTERNAL_APIS="false" \
@@ -187,6 +222,11 @@ jobs:
           -e DATABASE_URL="${{ secrets.QA_DATABASE_URL }}" \
           -e RESEND_API_KEY="dummy_resend_key_for_testing" \
           -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
+          -e FROM_EMAIL="test@luceron.ai" \
+          -e ALERT_FROM_EMAIL="test@luceron.ai" \
+          -e ADMIN_ALERT_EMAILS="test@luceron.ai" \
+          -e RESEND_WEBHOOK_SECRET="dummy_webhook_secret" \
+          -e PORT="8080" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
           -e ENABLE_EXTERNAL_APIS="false" \
