@@ -102,7 +102,7 @@ Analyze this query and return the routing decision."""
         operation_type = "READ" if intent == "READ" else "WRITE"
         
         # Get current date for date-aware planning
-        from datetime import datetime, timezone
+        from datetime import datetime, timezone, timedelta
         current_date = datetime.now(timezone.utc)
         current_date_str = current_date.strftime("%Y-%m-%d")
         current_datetime_str = current_date.isoformat()
@@ -114,13 +114,13 @@ TODAY'S DATE IS: {current_date_str}
 CURRENT YEAR IS: {current_date.year}
 
 MANDATORY DATE CALCULATION RULES:
-- "last 7 days" = created_at >= "{(current_date - datetime.timedelta(days=7)).strftime('%Y-%m-%d')}"
-- "recent" = created_at >= "{(current_date - datetime.timedelta(days=3)).strftime('%Y-%m-%d')}"
+- "last 7 days" = created_at >= "{(current_date - timedelta(days=7)).strftime('%Y-%m-%d')}"
+- "recent" = created_at >= "{(current_date - timedelta(days=3)).strftime('%Y-%m-%d')}"
 - "today" = created_at >= "{current_date_str}"
-- "this week" = created_at >= "{(current_date - datetime.timedelta(days=7)).strftime('%Y-%m-%d')}"
+- "this week" = created_at >= "{(current_date - timedelta(days=7)).strftime('%Y-%m-%d')}"
 
 NEVER use dates from 2023 or 2024. The current year is {current_date.year}.
-FOR "last 7 days", use: created_at >= "{(current_date - datetime.timedelta(days=7)).strftime('%Y-%m-%d')}"
+FOR "last 7 days", use: created_at >= "{(current_date - timedelta(days=7)).strftime('%Y-%m-%d')}"
 
 IMPORTANT: Generate {operation_type} operations based on the natural language intent. 
 For WRITE operations, choose between INSERT or UPDATE based on the request context.
