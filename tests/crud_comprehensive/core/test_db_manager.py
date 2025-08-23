@@ -188,18 +188,40 @@ class TestDatabaseManager:
             # Step 2: Generate DDL statements
             ddl_statements = self.schema_extractor.generate_ddl_statements(schema)
             
-            # Execute DDL statements
+            # Execute DDL statements with better categorization
+            enum_count = len(schema.enums)
+            table_count = len(schema.tables)
+            total_statements = len(ddl_statements)
+            
+            print(f"   🔧 Executing {total_statements} DDL statements...")
+            print(f"      • {enum_count} enum types")
+            print(f"      • {table_count} tables")
+            print(f"      • ~{total_statements - enum_count - table_count} constraints/indexes")
+            
+            success_count = 0
             for i, statement in enumerate(ddl_statements):
                 try:
                     await conn.execute(statement)
+                    success_count += 1
+                    
+                    # Log successful table creations specifically
+                    if statement.strip().startswith("CREATE TABLE"):
+                        table_match = statement.split('"')[1] if '"' in statement else "unknown"
+                        print(f"   ✅ Created table: {table_match}")
+                        
                 except Exception as e:
-                    print(f"   ⚠️  Warning: DDL statement {i+1} failed: {e}")
-                    if "USER" in str(e) or "syntax error" in str(e):
-                        # Print full statement for debugging Supabase syntax issues
-                        print(f"      Full Statement: {statement}")
+                    error_type = "ENUM" if i < enum_count else "TABLE" if i < enum_count + table_count else "CONSTRAINT/INDEX"
+                    print(f"   ❌ {error_type} statement {i+1} failed: {e}")
+                    
+                    # Always print full statement for table creation failures
+                    if error_type == "TABLE":
+                        print(f"      FULL STATEMENT: {statement}")
+                    elif "syntax error" in str(e) or "does not exist" in str(e):
+                        print(f"      Statement: {statement[:200]}...")
                     else:
                         print(f"      Statement: {statement[:100]}...")
-                    # Continue with other statements
+            
+            print(f"   📊 DDL Results: {success_count}/{total_statements} statements successful")
             
             await conn.close()
             print(f"   ✅ Schema replication complete")
