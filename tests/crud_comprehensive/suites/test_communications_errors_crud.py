@@ -27,6 +27,14 @@ class TestClientCommunicationsCRUD:
         assert case_result.success, "Failed to create parent case"
         case_id = case_result.uuid
         
+        # Ensure case exists before creating communication (avoid transaction timing issues)
+        import asyncio
+        await asyncio.sleep(0.1)  # Small delay to ensure transaction is committed
+        
+        # Verify case exists by reading it back
+        case_read_result = await orch.execute_read("cases", "/api/cases/{id}", case_id)
+        assert case_read_result.success, f"Case {case_id} not found after creation"
+        
         # Generate communication data
         comm_data, expected_comm_id = orch.data_factory.generate_communication(case_id)
         
