@@ -84,7 +84,14 @@ jobs:
         pip install -r requirements.txt
         python runners/unified_runner.py --mode smoke --db-mode isolated --output json --verbose || {
           echo "Tests failed, showing detailed pytest output:"
-          cat test-results.json 2>/dev/null || echo "No test results file found"
+          if [ -f test-results.json ]; then
+            echo "=== PYTEST RESULTS JSON ==="
+            cat test-results.json
+            echo -e "\n=== EXTRACTING ERROR DETAILS ==="
+            python3 debug_test_results.py
+          else
+            echo "No test results file found"
+          fi
           exit 1
         }
     

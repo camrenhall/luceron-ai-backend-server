@@ -51,22 +51,38 @@ class SchemaExtractor:
         conn = None
         try:
             # Connect to production database (READ-ONLY operations)
-            conn = await asyncpg.connect(
-                self.config.database_url,
-                statement_cache_size=0,  # pgbouncer compatibility
-                command_timeout=30
+            print(f"   🔗 Connecting to database...")
+            conn = await asyncio.wait_for(
+                asyncpg.connect(
+                    self.config.database_url,
+                    statement_cache_size=0,  # pgbouncer compatibility
+                    command_timeout=30,
+                    timeout=30  # Connection timeout
+                ),
+                timeout=45.0  # Overall connection timeout
             )
+            print(f"   ✅ Database connected successfully")
             
             # Get all table names we care about
-            tables_to_extract = await self._get_tables_list(conn)
+            tables_to_extract = await asyncio.wait_for(
+                self._get_tables_list(conn), 
+                timeout=30.0
+            )
             print(f"   📋 Found {len(tables_to_extract)} tables to extract")
             
-            # Extract schema for each table
+            # Extract schema for each table with timeout protection
             table_schemas = {}
             for table_name in tables_to_extract:
                 print(f"   📊 Extracting {table_name}...")
-                table_schema = await self._extract_table_schema(conn, table_name)
-                table_schemas[table_name] = table_schema
+                try:
+                    table_schema = await asyncio.wait_for(
+                        self._extract_table_schema(conn, table_name),
+                        timeout=20.0
+                    )
+                    table_schemas[table_name] = table_schema
+                except asyncio.TimeoutError:
+                    print(f"   ⚠️  Timeout extracting schema for {table_name}, skipping...")
+                    continue
             
             # Create complete schema object
             schema_data = {
@@ -94,7 +110,13 @@ class SchemaExtractor:
             raise RuntimeError(f"Failed to extract schema from production: {e}")
         finally:
             if conn:
-                await conn.close()
+                try:
+                    # Close with timeout to prevent hanging
+                    await asyncio.wait_for(conn.close(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    print("   ⚠️  Database connection close timed out")
+                except Exception as e:
+                    print(f"   ⚠️  Error closing database connection: {e}")
     
     async def _get_tables_list(self, conn: asyncpg.Connection) -> List[str]:
         """Get list of tables to extract schema for"""
