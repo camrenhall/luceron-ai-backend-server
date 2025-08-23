@@ -53,6 +53,7 @@ jobs:
           --link test-database:test-database \
           -e DATABASE_URL="postgresql://test_user:test_pass@test-database:5432/test_luceron_db" \
           -e RESEND_API_KEY="dummy_resend_key_for_testing" \
+          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
           -e ENABLE_EXTERNAL_APIS="false" \
@@ -143,6 +144,7 @@ jobs:
           --link test-database:test-database \
           -e DATABASE_URL="postgresql://test_user:test_pass@test-database:5432/test_luceron_db" \
           -e RESEND_API_KEY="dummy_resend_key_for_testing" \
+          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
           -e ENABLE_EXTERNAL_APIS="false" \
@@ -234,6 +236,7 @@ jobs:
           --link test-database:test-database \
           -e DATABASE_URL="postgresql://test_user:test_pass@test-database:5432/test_luceron_db" \
           -e RESEND_API_KEY="dummy_resend_key_for_testing" \
+          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
           -e ENABLE_EXTERNAL_APIS="false" \
