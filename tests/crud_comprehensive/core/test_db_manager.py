@@ -182,7 +182,10 @@ class TestDatabaseManager:
         try:
             conn = await asyncpg.connect(test_db.connection_url)
             
-            # Generate DDL statements
+            # Step 1: Create required extensions
+            await self._setup_postgres_extensions(conn)
+            
+            # Step 2: Generate DDL statements
             ddl_statements = self.schema_extractor.generate_ddl_statements(schema)
             
             # Execute DDL statements
@@ -199,6 +202,19 @@ class TestDatabaseManager:
             
         except Exception as e:
             raise RuntimeError(f"Failed to replicate schema: {e}")
+    
+    async def _setup_postgres_extensions(self, conn: asyncpg.Connection):
+        """Setup PostgreSQL extensions required for Supabase compatibility"""
+        extensions = [
+            "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";",
+            "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";"
+        ]
+        
+        for ext in extensions:
+            try:
+                await conn.execute(ext)
+            except Exception as e:
+                print(f"   ⚠️  Extension setup warning: {e}")
     
     async def validate_schema_fidelity(self, test_db: TestDatabase) -> Dict[str, Any]:
         """Validate that test database schema matches production"""

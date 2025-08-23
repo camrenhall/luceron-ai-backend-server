@@ -185,7 +185,7 @@ def pytest_collection_modifyitems(config, items):
     # Add markers based on test names and patterns
     for item in items:
         # Smoke tests - critical functionality only
-        if any(name in item.name.lower() for name in ["health", "auth", "basic", "connectivity", "token"]):
+        if any(name in item.name.lower() for name in ["health", "auth", "basic", "connectivity", "token", "full_crud_cycle"]):
             item.add_marker(pytest.mark.smoke)
             item.add_marker(pytest.mark.fast)
         

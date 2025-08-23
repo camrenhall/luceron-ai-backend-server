@@ -298,9 +298,11 @@ class SchemaExtractor:
             if col["is_nullable"] == "NO":
                 col_def += " NOT NULL"
             
-            # Add DEFAULT
+            # Add DEFAULT (clean up Supabase-specific syntax)
             if col["column_default"]:
-                col_def += f' DEFAULT {col["column_default"]}'
+                default_value = self._normalize_column_default(col["column_default"])
+                if default_value:
+                    col_def += f' DEFAULT {default_value}'
             
             columns.append(col_def)
         
@@ -345,6 +347,32 @@ REFERENCES "{fk["foreign_table_name"]}" ("{fk["foreign_column_name"]}")'''
             fk_statements.append(alter_sql)
         
         return fk_statements
+    
+    def _normalize_column_default(self, default_value: str) -> Optional[str]:
+        """Normalize Supabase-specific column defaults for vanilla PostgreSQL"""
+        if not default_value:
+            return None
+        
+        # Handle Supabase USER() function -> current user
+        if "USER" in default_value:
+            return "CURRENT_USER"
+        
+        # Handle uuid_generate_v4() -> gen_random_uuid() for PostgreSQL 13+
+        if "uuid_generate_v4()" in default_value:
+            return "gen_random_uuid()"
+        
+        # Handle Supabase-specific timestamp functions
+        if "CURRENT_TIMESTAMP" in default_value:
+            return "CURRENT_TIMESTAMP"
+        
+        # Handle now() function
+        if "now()" in default_value:
+            return "CURRENT_TIMESTAMP"
+        
+        # Remove any quoted string indicators that might cause issues
+        cleaned = default_value.replace("::text", "").strip()
+        
+        return cleaned if cleaned else None
     
     def _generate_index_ddl(self, table_schema: TableSchema) -> List[str]:
         """Generate CREATE INDEX statements"""
