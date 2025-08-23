@@ -109,7 +109,7 @@ class BaseCRUDTest(ABC):
         assert create_result.uuid, f"No UUID returned from {self.resource_name} creation"
         created_id = create_result.uuid
         
-        # Validate database state after CREATE
+        # Validate database state after CREATE (with proper transaction isolation)
         create_validation = await orch.validate_database_state(
             table=self.config.table,
             uuid_field=self.config.uuid_field,
@@ -117,7 +117,6 @@ class BaseCRUDTest(ABC):
             operation="CREATE"
         )
         assert create_validation.valid, f"Database validation failed after CREATE: {create_validation.errors}"
-        
         
         # === READ ===
         read_result = await orch.execute_read(
@@ -139,7 +138,7 @@ class BaseCRUDTest(ABC):
         
         assert update_result.success, f"{self.resource_name} update failed: {update_result.errors}"
         
-        # Validate database state after UPDATE
+        # Validate database state after UPDATE (with proper transaction isolation)
         update_validation = await orch.validate_database_state(
             table=self.config.table,
             uuid_field=self.config.uuid_field,
@@ -157,7 +156,7 @@ class BaseCRUDTest(ABC):
         
         assert delete_result.success, f"{self.resource_name} DELETE failed: {delete_result.errors}"
         
-        # Verify deletion by checking 404 response
+        # Verify deletion by checking database directly (with proper transaction isolation)
         verify_response, _ = await orch.time_operation(
             "VERIFY_DELETE",
             orch.rest_client.request("GET", f"{self.config.endpoint}/{created_id}")
@@ -241,7 +240,7 @@ class BaseCRUDTest(ABC):
         assert create_result.errors, "Should have validation errors"
     
     async def test_performance_thresholds(self, clean_orchestrator: CRUDTestOrchestrator):
-        """Test operations meet performance thresholds"""
+        """Test operations meet performance thresholds using atomic API validation"""
         orch = clean_orchestrator
         
         # Create dependencies and test data

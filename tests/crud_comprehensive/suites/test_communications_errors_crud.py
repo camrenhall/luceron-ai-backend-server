@@ -34,14 +34,13 @@ class TestClientCommunicationsCRUD:
         # Generate communication data
         comm_data, expected_comm_id = orch.data_factory.generate_communication(case_id)
         
-        # === CREATE COMMUNICATION (direct database) ===
+        # === CREATE COMMUNICATION ===
         create_result = await orch.execute_create(
             resource="client_communications",
             endpoint="/api/communications",
             data=comm_data
         )
         
-        # Direct database communication creation should work
         assert create_result.success, f"Communication creation failed: {create_result.errors}"
         
         # If email succeeded, verify communication was logged

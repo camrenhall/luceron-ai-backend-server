@@ -33,13 +33,13 @@ class DatabaseValidator:
         self.pool: Optional[asyncpg.Pool] = None
         
     async def connect(self):
-        """Initialize database connection pool"""
+        """Initialize database connection pool with same settings as server"""
         if self.pool is None:
             self.pool = await asyncpg.create_pool(
                 self.config.qa_database_url,
                 min_size=2,
-                max_size=5,
-                command_timeout=30,
+                max_size=10,  # Match server pool size
+                command_timeout=60,  # Match server timeout
                 statement_cache_size=0  # Required for pgbouncer compatibility
             )
     
@@ -54,11 +54,13 @@ class DatabaseValidator:
                 self.pool = None
     
     async def record_exists(self, table: str, uuid_field: str, uuid_value: str) -> bool:
-        """Check if record exists in database"""
+        """Check if record exists in database with proper isolation"""
         await self.connect()
         
         query = f"SELECT 1 FROM {table} WHERE {uuid_field} = $1"
         async with self.pool.acquire() as conn:
+            # Ensure we see the latest committed data from all connections
+            await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
             result = await conn.fetchval(query, uuid_value)
             return result is not None
     
