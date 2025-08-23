@@ -187,8 +187,8 @@ class DatabaseValidator:
                     
             elif table == "client_communications":
                 # Validate channel and direction enums
-                valid_channels = ['EMAIL', 'SMS']
-                valid_directions = ['INBOUND', 'OUTBOUND']
+                valid_channels = ['email', 'sms']
+                valid_directions = ['incoming', 'outgoing']
                 if record.get('channel') not in valid_channels:
                     validation.errors.append(f"Invalid communication channel: {record.get('channel')}")
                     validation.valid = False

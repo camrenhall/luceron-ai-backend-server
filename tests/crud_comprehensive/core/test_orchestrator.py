@@ -382,3 +382,9 @@ class CRUDTestOrchestrator:
             "failed": total - successful,
             "success_rate": successful / total if total > 0 else 0
         }
+    
+    async def cleanup_test_data(self):
+        """Cleanup test data method for compatibility with conftest"""
+        if self.config.cleanup_test_data:
+            cleanup_count = await self.db_validator.cleanup_test_data(self.config.test_data_prefix)
+            print(f"🧹 Cleaned up {cleanup_count} test records")

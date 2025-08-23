@@ -67,8 +67,8 @@ class DataFactory:
         
         data = {
             "case_id": case_id,
-            "channel": "EMAIL",
-            "direction": "OUTBOUND",
+            "channel": "email",
+            "direction": "outgoing",
             "status": "sent",
             "sender": f"test.sender@{self.config.test_data_prefix.lower().replace('_', '-')}.example.com",
             "recipient": f"test.recipient@{self.config.test_data_prefix.lower().replace('_', '-')}.example.com",
