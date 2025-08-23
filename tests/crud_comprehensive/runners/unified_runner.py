@@ -51,6 +51,16 @@ class UnifiedTestRunner:
         """Test basic connectivity and authentication"""
         print("🔍 Testing Connectivity & Authentication...")
         
+        # Debug environment variables
+        import os
+        qa_db_url = os.getenv('QA_DATABASE_URL')
+        print(f"   🔍 QA_DATABASE_URL env var: {'SET' if qa_db_url else 'NOT SET'}")
+        if qa_db_url:
+            import urllib.parse
+            parsed = urllib.parse.urlparse(qa_db_url)
+            print(f"   🔍 Database user: {parsed.username}")
+            print(f"   🔍 Database host: {parsed.hostname}")
+        
         try:
             orch = CRUDTestOrchestrator()
             await orch.setup()

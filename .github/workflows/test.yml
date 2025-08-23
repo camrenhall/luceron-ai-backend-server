@@ -37,12 +37,12 @@ jobs:
         docker run -d \
           --name test-api \
           -e DATABASE_URL="${{ secrets.QA_DATABASE_URL }}" \
-          -e RESEND_API_KEY="dummy_resend_key_for_testing" \
-          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
-          -e FROM_EMAIL="test@luceron.ai" \
-          -e ALERT_FROM_EMAIL="test@luceron.ai" \
-          -e ADMIN_ALERT_EMAILS="test@luceron.ai" \
-          -e RESEND_WEBHOOK_SECRET="dummy_webhook_secret" \
+          -e RESEND_API_KEY="re_test_dummy_key_for_testing_only" \
+          -e OPENAI_API_KEY="sk-test_dummy_key_for_testing_only" \
+          -e FROM_EMAIL="noreply@testing.local" \
+          -e ALERT_FROM_EMAIL="alerts@testing.local" \
+          -e ADMIN_ALERT_EMAILS="admin@testing.local" \
+          -e RESEND_WEBHOOK_SECRET="whsec_test_dummy_webhook_secret" \
           -e PORT="8080" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
@@ -96,6 +96,14 @@ jobs:
       run: |
         cd tests/crud_comprehensive
         pip install -r requirements.txt
+        
+        # Debug environment variables
+        echo "=== DEBUGGING ENVIRONMENT VARIABLES ==="
+        echo "QA_DATABASE_URL is set: $([ -n "$QA_DATABASE_URL" ] && echo "YES" || echo "NO")"
+        echo "QA_DATABASE_URL length: ${#QA_DATABASE_URL}"
+        echo "QA_DATABASE_URL first 50 chars: ${QA_DATABASE_URL:0:50}..."
+        echo "============================================"
+        
         python runners/unified_runner.py --mode smoke --db-mode qa --output json --verbose || {
           echo "Tests failed, showing detailed pytest output:"
           if [ -f test-results.json ]; then
@@ -146,12 +154,12 @@ jobs:
         docker run -d \
           --name test-api \
           -e DATABASE_URL="${{ secrets.QA_DATABASE_URL }}" \
-          -e RESEND_API_KEY="dummy_resend_key_for_testing" \
-          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
-          -e FROM_EMAIL="test@luceron.ai" \
-          -e ALERT_FROM_EMAIL="test@luceron.ai" \
-          -e ADMIN_ALERT_EMAILS="test@luceron.ai" \
-          -e RESEND_WEBHOOK_SECRET="dummy_webhook_secret" \
+          -e RESEND_API_KEY="re_test_dummy_key_for_testing_only" \
+          -e OPENAI_API_KEY="sk-test_dummy_key_for_testing_only" \
+          -e FROM_EMAIL="noreply@testing.local" \
+          -e ALERT_FROM_EMAIL="alerts@testing.local" \
+          -e ADMIN_ALERT_EMAILS="admin@testing.local" \
+          -e RESEND_WEBHOOK_SECRET="whsec_test_dummy_webhook_secret" \
           -e PORT="8080" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
@@ -220,12 +228,12 @@ jobs:
         docker run -d \
           --name test-api \
           -e DATABASE_URL="${{ secrets.QA_DATABASE_URL }}" \
-          -e RESEND_API_KEY="dummy_resend_key_for_testing" \
-          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
-          -e FROM_EMAIL="test@luceron.ai" \
-          -e ALERT_FROM_EMAIL="test@luceron.ai" \
-          -e ADMIN_ALERT_EMAILS="test@luceron.ai" \
-          -e RESEND_WEBHOOK_SECRET="dummy_webhook_secret" \
+          -e RESEND_API_KEY="re_test_dummy_key_for_testing_only" \
+          -e OPENAI_API_KEY="sk-test_dummy_key_for_testing_only" \
+          -e FROM_EMAIL="noreply@testing.local" \
+          -e ALERT_FROM_EMAIL="alerts@testing.local" \
+          -e ADMIN_ALERT_EMAILS="admin@testing.local" \
+          -e RESEND_WEBHOOK_SECRET="whsec_test_dummy_webhook_secret" \
           -e PORT="8080" \
           -e ENVIRONMENT="test" \
           -e ENABLE_AUTH="false" \
