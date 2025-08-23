@@ -68,7 +68,7 @@ jobs:
         echo "Checking API container logs:"
         docker logs test-api
         echo "Attempting health check..."
-        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do echo "Health check failed, retrying..."; sleep 2; done' || {
+        timeout 60s bash -c 'until curl -f http://localhost:8080/; do echo "Health check failed, retrying..."; sleep 2; done' || {
           echo "Health check timed out. Final container logs:"
           docker logs test-api
           exit 1
@@ -159,7 +159,7 @@ jobs:
         echo "Checking API container logs:"
         docker logs test-api
         echo "Attempting health check..."
-        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do echo "Health check failed, retrying..."; sleep 2; done' || {
+        timeout 60s bash -c 'until curl -f http://localhost:8080/; do echo "Health check failed, retrying..."; sleep 2; done' || {
           echo "Health check timed out. Final container logs:"
           docker logs test-api
           exit 1
@@ -251,7 +251,7 @@ jobs:
         echo "Checking API container logs:"
         docker logs test-api
         echo "Attempting health check..."
-        timeout 60s bash -c 'until curl -f http://localhost:8080/health; do echo "Health check failed, retrying..."; sleep 2; done' || {
+        timeout 60s bash -c 'until curl -f http://localhost:8080/; do echo "Health check failed, retrying..."; sleep 2; done' || {
           echo "Health check timed out. Final container logs:"
           docker logs test-api
           exit 1
