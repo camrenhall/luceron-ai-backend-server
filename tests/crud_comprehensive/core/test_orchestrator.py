@@ -111,10 +111,16 @@ class CRUDTestOrchestrator:
     
     async def execute_create(self, resource: str, endpoint: str, data: Dict[str, Any]) -> TestResult:
         """Execute CREATE operation"""
+        print(f"🔍 DEBUG CREATE: {resource} -> POST {endpoint}")
+        print(f"   Data: {data}")
+        
         response, duration = await self.time_operation(
             f"CREATE {resource}",
             self.rest_client.request("POST", endpoint, data)
         )
+        
+        print(f"   Response: {response}")
+        print(f"   Duration: {duration}s")
         
         success = response.get("_success", False)
         errors = []
@@ -122,7 +128,20 @@ class CRUDTestOrchestrator:
         uuid_value = None
         
         if not success:
-            errors.append(f"HTTP {response.get('_status_code')}: {response.get('detail', 'Unknown error')}")
+            # Enhanced error reporting - show full response for debugging
+            status_code = response.get('_status_code', 'Unknown')
+            error_detail = response.get('detail', response.get('message', 'No error message'))
+            
+            # Show additional error context if available
+            error_parts = [f"HTTP {status_code}: {error_detail}"]
+            if 'error' in response and response['error'] != error_detail:
+                error_parts.append(f"Error: {response['error']}")
+            if 'traceback' in response:
+                error_parts.append(f"Traceback: {response['traceback'][:200]}...")
+            if 'raw_response' in response:
+                error_parts.append(f"Raw: {response['raw_response'][:200]}...")
+                
+            errors.append(" | ".join(error_parts))
         else:
             # Extract UUID from response
             uuid_value = self._extract_uuid(response)
@@ -164,7 +183,20 @@ class CRUDTestOrchestrator:
         warnings = []
         
         if not success:
-            errors.append(f"HTTP {response.get('_status_code')}: {response.get('detail', 'Unknown error')}")
+            # Enhanced error reporting - show full response for debugging
+            status_code = response.get('_status_code', 'Unknown')
+            error_detail = response.get('detail', response.get('message', 'No error message'))
+            
+            # Show additional error context if available
+            error_parts = [f"HTTP {status_code}: {error_detail}"]
+            if 'error' in response and response['error'] != error_detail:
+                error_parts.append(f"Error: {response['error']}")
+            if 'traceback' in response:
+                error_parts.append(f"Traceback: {response['traceback'][:200]}...")
+            if 'raw_response' in response:
+                error_parts.append(f"Raw: {response['raw_response'][:200]}...")
+                
+            errors.append(" | ".join(error_parts))
             
         result = TestResult(
             operation="READ",
@@ -201,7 +233,20 @@ class CRUDTestOrchestrator:
         warnings = []
         
         if not success:
-            errors.append(f"HTTP {response.get('_status_code')}: {response.get('detail', 'Unknown error')}")
+            # Enhanced error reporting - show full response for debugging
+            status_code = response.get('_status_code', 'Unknown')
+            error_detail = response.get('detail', response.get('message', 'No error message'))
+            
+            # Show additional error context if available
+            error_parts = [f"HTTP {status_code}: {error_detail}"]
+            if 'error' in response and response['error'] != error_detail:
+                error_parts.append(f"Error: {response['error']}")
+            if 'traceback' in response:
+                error_parts.append(f"Traceback: {response['traceback'][:200]}...")
+            if 'raw_response' in response:
+                error_parts.append(f"Raw: {response['raw_response'][:200]}...")
+                
+            errors.append(" | ".join(error_parts))
             
         result = TestResult(
             operation="UPDATE",
@@ -238,7 +283,20 @@ class CRUDTestOrchestrator:
         warnings = []
         
         if not success:
-            errors.append(f"HTTP {response.get('_status_code')}: {response.get('detail', 'Unknown error')}")
+            # Enhanced error reporting - show full response for debugging
+            status_code = response.get('_status_code', 'Unknown')
+            error_detail = response.get('detail', response.get('message', 'No error message'))
+            
+            # Show additional error context if available
+            error_parts = [f"HTTP {status_code}: {error_detail}"]
+            if 'error' in response and response['error'] != error_detail:
+                error_parts.append(f"Error: {response['error']}")
+            if 'traceback' in response:
+                error_parts.append(f"Traceback: {response['traceback'][:200]}...")
+            if 'raw_response' in response:
+                error_parts.append(f"Raw: {response['raw_response'][:200]}...")
+                
+            errors.append(" | ".join(error_parts))
             
         result = TestResult(
             operation="DELETE",
