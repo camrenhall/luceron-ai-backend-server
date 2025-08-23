@@ -12,7 +12,7 @@ from pathlib import Path
 # Add current directory to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.test_orchestrator import TestOrchestrator
+from core.test_orchestrator import CRUDTestOrchestrator
 from config import get_config
 
 
@@ -24,7 +24,7 @@ async def run_connectivity_test():
         config = get_config()
         print(f"   API Base URL: {config.api_base_url}")
         
-        orch = TestOrchestrator()
+        orch = CRUDTestOrchestrator()
         await orch.setup()
         
         # Test OAuth token generation
@@ -62,7 +62,7 @@ async def run_basic_crud_test():
     """Run basic CRUD test to validate functionality"""
     print("\n🧪 Running Basic CRUD Test...")
     
-    orch = TestOrchestrator()
+    orch = CRUDTestOrchestrator()
     await orch.setup()
     
     try:
@@ -104,7 +104,7 @@ async def run_performance_summary():
     """Show performance summary"""
     print("\n📊 Performance Summary:")
     
-    orch = TestOrchestrator()
+    orch = CRUDTestOrchestrator()
     await orch.setup()
     
     try:

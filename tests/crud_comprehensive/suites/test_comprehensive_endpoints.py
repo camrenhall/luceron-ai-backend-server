@@ -11,14 +11,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.test_orchestrator import TestOrchestrator
+from core.test_orchestrator import CRUDTestOrchestrator
 
 
 @pytest.mark.crud
 class TestComprehensiveEndpointCoverage:
     """Systematic testing of ALL API endpoints - CRITICAL for complete coverage"""
     
-    async def test_health_and_oauth_endpoints(self, clean_orchestrator: TestOrchestrator):
+    async def test_health_and_oauth_endpoints(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test health and authentication endpoints - FOUNDATION"""
         orch = clean_orchestrator
         
@@ -44,7 +44,7 @@ class TestComprehensiveEndpointCoverage:
         )
         print(f"OAuth health status: {oauth_health_response.get('_status_code', 'unknown')}")
     
-    async def test_all_cases_endpoints(self, clean_orchestrator: TestOrchestrator):
+    async def test_all_cases_endpoints(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test ALL cases endpoints identified in OpenAPI - CRITICAL"""
         orch = clean_orchestrator
         
@@ -77,7 +77,7 @@ class TestComprehensiveEndpointCoverage:
             assert success, f"Cases endpoint failed: {method} {endpoint} - {response}"
             print(f"✅ Cases endpoint: {method} {endpoint} ({description})")
     
-    async def test_all_documents_endpoints(self, clean_orchestrator: TestOrchestrator):
+    async def test_all_documents_endpoints(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test ALL documents endpoints - CRITICAL for document workflow"""
         orch = clean_orchestrator
         
@@ -133,7 +133,7 @@ class TestComprehensiveEndpointCoverage:
             else:
                 print(f"⚠️  Documents endpoint: {method} {endpoint} ({description}) - Status: {response.get('_status_code', 'unknown')}")
     
-    async def test_all_agent_endpoints_systematic(self, clean_orchestrator: TestOrchestrator):
+    async def test_all_agent_endpoints_systematic(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test ALL agent endpoints systematically - CRITICAL for agent functionality"""
         orch = clean_orchestrator
         
@@ -202,7 +202,7 @@ class TestComprehensiveEndpointCoverage:
             else:
                 print(f"⚠️  Agent endpoint: {method} {endpoint} ({description}) - Status: {response.get('_status_code', 'unknown')}")
     
-    async def test_email_and_webhook_endpoints(self, clean_orchestrator: TestOrchestrator):
+    async def test_email_and_webhook_endpoints(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test email and webhook endpoints - CRITICAL for communication"""
         orch = clean_orchestrator
         
@@ -244,7 +244,7 @@ class TestComprehensiveEndpointCoverage:
         
         print(f"Webhook endpoint status: {webhook_response.get('_status_code', 'unknown')}")
     
-    async def test_error_logs_and_alerts_endpoints(self, clean_orchestrator: TestOrchestrator):
+    async def test_error_logs_and_alerts_endpoints(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test error logging and alerts - CRITICAL for system monitoring"""
         orch = clean_orchestrator
         
@@ -282,7 +282,7 @@ class TestComprehensiveEndpointCoverage:
         assert stats_response.get("_success", False), f"Component stats failed: {stats_response}"
         print("✅ Component stats endpoint working")
     
-    async def test_agent_db_natural_language_endpoint(self, clean_orchestrator: TestOrchestrator):
+    async def test_agent_db_natural_language_endpoint(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test Agent Gateway natural language interface - CRITICAL core functionality"""
         orch = clean_orchestrator
         
@@ -325,7 +325,7 @@ class TestComprehensiveEndpointCoverage:
 class TestMissingCriticalFunctionality:
     """Test functionality that might be missing but is CRITICAL"""
     
-    async def test_delete_operations_all_resources(self, clean_orchestrator: TestOrchestrator):
+    async def test_delete_operations_all_resources(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test DELETE operations for all resources - CRITICAL for data management"""
         orch = clean_orchestrator
         
@@ -363,7 +363,7 @@ class TestMissingCriticalFunctionality:
             else:
                 print(f"⚠️  DELETE {resource} not available or failed")
     
-    async def test_performance_under_load(self, clean_orchestrator: TestOrchestrator):
+    async def test_performance_under_load(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test performance thresholds with multiple operations - CRITICAL for production readiness"""
         orch = clean_orchestrator
         

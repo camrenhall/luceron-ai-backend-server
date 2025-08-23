@@ -10,14 +10,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.test_orchestrator import TestOrchestrator
+from core.test_orchestrator import CRUDTestOrchestrator
 
 
 @pytest.mark.integration
 class TestCrossTableOperations:
     """Integration tests for multi-table operations"""
     
-    async def test_case_document_workflow(self, clean_orchestrator: TestOrchestrator):
+    async def test_case_document_workflow(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test complete case → documents → analysis workflow"""
         orch = clean_orchestrator
         
@@ -80,7 +80,7 @@ class TestCrossTableOperations:
         if case_analysis_response.get("_success", False):
             print(f"✅ Case analysis summary endpoint working")
     
-    async def test_agent_conversation_workflow(self, clean_orchestrator: TestOrchestrator):
+    async def test_agent_conversation_workflow(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test agent conversation → messages → summaries workflow"""
         orch = clean_orchestrator
         
@@ -140,7 +140,7 @@ class TestCrossTableOperations:
         
         assert full_conv_response.get("_success", False), "Failed to get full conversation"
     
-    async def test_agent_context_management(self, clean_orchestrator: TestOrchestrator):
+    async def test_agent_context_management(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test agent context storage and retrieval"""
         orch = clean_orchestrator
         
@@ -193,7 +193,7 @@ class TestCrossTableOperations:
         
         assert specific_context_response.get("_success", False), "Failed to get specific context"
     
-    async def test_database_foreign_key_integrity(self, clean_orchestrator: TestOrchestrator):
+    async def test_database_foreign_key_integrity(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test foreign key integrity across related tables"""
         orch = clean_orchestrator
         

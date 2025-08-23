@@ -44,7 +44,7 @@ class CRUDCycleResult:
     total_duration: float
 
 
-class TestOrchestrator:
+class CRUDTestOrchestrator:
     """Lightweight central coordinator for CRUD testing"""
     
     def __init__(self):

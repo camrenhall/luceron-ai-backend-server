@@ -10,14 +10,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.test_orchestrator import TestOrchestrator
+from core.test_orchestrator import CRUDTestOrchestrator
 
 
 @pytest.mark.crud
 class TestDocumentsCRUD:
     """Comprehensive CRUD testing for documents table"""
     
-    async def test_documents_full_crud_cycle(self, clean_orchestrator: TestOrchestrator):
+    async def test_documents_full_crud_cycle(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test complete document CRUD cycle with case dependency"""
         orch = clean_orchestrator
         
@@ -83,7 +83,7 @@ class TestDocumentsCRUD:
         )
         assert update_validation.valid, f"Database validation failed after UPDATE: {update_validation.errors}"
     
-    async def test_documents_batch_lookup(self, clean_orchestrator: TestOrchestrator):
+    async def test_documents_batch_lookup(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test document batch lookup functionality"""
         orch = clean_orchestrator
         
@@ -127,7 +127,7 @@ class TestDocumentsCRUD:
         
         assert response.get("_success", False), f"Batch lookup failed: {response}"
     
-    async def test_document_analysis_storage(self, clean_orchestrator: TestOrchestrator):
+    async def test_document_analysis_storage(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test document analysis storage"""
         orch = clean_orchestrator
         
@@ -169,7 +169,7 @@ class TestDocumentsCRUD:
         
         assert get_response.get("_success", False), f"Analysis retrieval failed: {get_response}"
     
-    async def test_documents_foreign_key_validation(self, clean_orchestrator: TestOrchestrator):
+    async def test_documents_foreign_key_validation(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test documents creation with invalid case_id"""
         orch = clean_orchestrator
         
@@ -192,7 +192,7 @@ class TestDocumentsCRUD:
         # Should fail due to foreign key constraint
         assert not create_result.success, "Document creation should fail with invalid case_id"
     
-    async def test_documents_status_transitions(self, clean_orchestrator: TestOrchestrator):
+    async def test_documents_status_transitions(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test valid document status transitions"""
         orch = clean_orchestrator
         

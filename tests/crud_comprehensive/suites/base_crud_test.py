@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.test_orchestrator import TestOrchestrator
-from config.resources import get_resource_config, ResourceConfig
+from core.test_orchestrator import CRUDTestOrchestrator
+from test_config.resources import get_resource_config, ResourceConfig
 
 
 class BaseCRUDTest(ABC):
@@ -39,7 +39,7 @@ class BaseCRUDTest(ABC):
         self.config = get_resource_config(self.resource_name)
         self.dependencies = {}
     
-    async def create_dependencies(self, orchestrator: TestOrchestrator) -> Dict[str, str]:
+    async def create_dependencies(self, orchestrator: CRUDTestOrchestrator) -> Dict[str, str]:
         """Create required dependencies for this resource"""
         created_deps = {}
         
@@ -67,7 +67,7 @@ class BaseCRUDTest(ABC):
             
         return created_deps
     
-    def generate_test_data(self, orchestrator: TestOrchestrator, **overrides) -> tuple[Dict[str, Any], str]:
+    def generate_test_data(self, orchestrator: CRUDTestOrchestrator, **overrides) -> tuple[Dict[str, Any], str]:
         """Generate test data for this resource"""
         factory_method = getattr(orchestrator.data_factory, self.config.factory_method)
         
@@ -85,7 +85,7 @@ class BaseCRUDTest(ABC):
         
         return factory_method(**overrides)
     
-    async def test_full_crud_cycle(self, clean_orchestrator: TestOrchestrator):
+    async def test_full_crud_cycle(self, clean_orchestrator: CRUDTestOrchestrator):
         """
         Test complete CREATE → READ → UPDATE → DELETE cycle
         Generic implementation for any resource
@@ -165,7 +165,7 @@ class BaseCRUDTest(ABC):
         assert not verify_response.get("_success", True), f"{self.resource_name} should not exist after DELETE"
         assert verify_response.get("_status_code") == 404, f"Expected 404, got {verify_response.get('_status_code')}"
     
-    async def test_list_operation(self, clean_orchestrator: TestOrchestrator):
+    async def test_list_operation(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test list endpoint for this resource"""
         orch = clean_orchestrator
         
@@ -192,7 +192,7 @@ class BaseCRUDTest(ABC):
         assert "data" in response or self.resource_name in response or isinstance(response, list), \
             "List response should contain data"
     
-    async def test_search_operation(self, clean_orchestrator: TestOrchestrator):
+    async def test_search_operation(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test search endpoint for this resource"""
         orch = clean_orchestrator
         
@@ -219,7 +219,7 @@ class BaseCRUDTest(ABC):
         
         assert response.get("_success", False), f"{self.resource_name} search failed: {response}"
     
-    async def test_validation_errors(self, clean_orchestrator: TestOrchestrator):
+    async def test_validation_errors(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test resource creation with invalid data"""
         orch = clean_orchestrator
         
@@ -239,7 +239,7 @@ class BaseCRUDTest(ABC):
         assert not create_result.success, f"{self.resource_name} creation should fail with invalid data"
         assert create_result.errors, "Should have validation errors"
     
-    async def test_performance_thresholds(self, clean_orchestrator: TestOrchestrator):
+    async def test_performance_thresholds(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test operations meet performance thresholds"""
         orch = clean_orchestrator
         
@@ -276,7 +276,7 @@ class BaseCRUDTest(ABC):
         # Default update data - subclasses can override
         return {"status": "UPDATED"}
     
-    def get_searchable_test_data(self, orchestrator: TestOrchestrator) -> Dict[str, Any]:
+    def get_searchable_test_data(self, orchestrator: CRUDTestOrchestrator) -> Dict[str, Any]:
         """Get searchable data for search tests (default implementation)"""
         # Default searchable data - subclasses can override
         return {f"{orchestrator.config.test_data_prefix}_SearchTest": True}

@@ -10,14 +10,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.test_orchestrator import TestOrchestrator
+from core.test_orchestrator import CRUDTestOrchestrator
 
 
 @pytest.mark.crud
 class TestClientCommunicationsCRUD:
     """Complete CRUD testing for client_communications table"""
     
-    async def test_communications_full_crud_cycle(self, clean_orchestrator: TestOrchestrator):
+    async def test_communications_full_crud_cycle(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test complete communication CRUD cycle with case dependency"""
         orch = clean_orchestrator
         
@@ -59,7 +59,7 @@ class TestClientCommunicationsCRUD:
             
             assert case_comms_response.get("_success", False), f"Case communications retrieval failed: {case_comms_response}"
     
-    async def test_communication_channels_and_directions(self, clean_orchestrator: TestOrchestrator):
+    async def test_communication_channels_and_directions(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test different communication channels and directions"""
         orch = clean_orchestrator
         
@@ -100,7 +100,7 @@ class TestClientCommunicationsCRUD:
 class TestErrorLogsCRUD:
     """Complete CRUD testing for error_logs table"""
     
-    async def test_error_logs_full_crud_cycle(self, clean_orchestrator: TestOrchestrator):
+    async def test_error_logs_full_crud_cycle(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test complete error log CRUD cycle"""
         orch = clean_orchestrator
         
@@ -149,7 +149,7 @@ class TestErrorLogsCRUD:
         )
         assert error_count > 0, "Error log not found in database"
     
-    async def test_error_severity_levels(self, clean_orchestrator: TestOrchestrator):
+    async def test_error_severity_levels(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test all error severity levels"""
         orch = clean_orchestrator
         
@@ -179,7 +179,7 @@ class TestErrorLogsCRUD:
         )
         assert total_count >= len(severity_levels), f"Expected at least {len(severity_levels)} error logs, found {total_count}"
     
-    async def test_error_log_context_validation(self, clean_orchestrator: TestOrchestrator):
+    async def test_error_log_context_validation(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test JSONB context field validation"""
         orch = clean_orchestrator
         
@@ -226,7 +226,7 @@ class TestErrorLogsCRUD:
 class TestWebhooksCRUD:
     """Test webhook endpoints - CRITICAL for email status updates"""
     
-    async def test_resend_webhook_endpoint(self, clean_orchestrator: TestOrchestrator):
+    async def test_resend_webhook_endpoint(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test Resend webhook handling"""
         orch = clean_orchestrator
         

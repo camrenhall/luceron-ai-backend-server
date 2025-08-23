@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.test_orchestrator import TestOrchestrator
+from core.test_orchestrator import CRUDTestOrchestrator
 from core.rest_client import RestClient
 from core.test_db_manager import TestDatabaseManager, SchemaChangeDetector
 
@@ -122,12 +122,12 @@ async def shared_rest_client() -> AsyncGenerator[RestClient, None]:
 
 
 @pytest.fixture(scope="function")
-async def clean_orchestrator(shared_rest_client, isolated_database) -> AsyncGenerator[TestOrchestrator, None]:
+async def clean_orchestrator(shared_rest_client, isolated_database) -> AsyncGenerator[CRUDTestOrchestrator, None]:
     """Optimized test orchestrator with isolated database support"""
     from config import get_config
     config = get_config()
     
-    orch = TestOrchestrator()
+    orch = CRUDTestOrchestrator()
     orch.rest_client = shared_rest_client  # Reuse authenticated client
     
     # Configure database connection based on mode
@@ -157,9 +157,9 @@ async def clean_orchestrator(shared_rest_client, isolated_database) -> AsyncGene
 
 
 @pytest.fixture(scope="session")
-async def orchestrator() -> AsyncGenerator[TestOrchestrator, None]:
+async def orchestrator() -> AsyncGenerator[CRUDTestOrchestrator, None]:
     """Legacy session-scoped test orchestrator for compatibility"""
-    orch = TestOrchestrator()
+    orch = CRUDTestOrchestrator()
     await orch.setup()
     yield orch
     await orch.teardown()

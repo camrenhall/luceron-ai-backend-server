@@ -18,7 +18,7 @@ from datetime import datetime
 # Add current directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.test_orchestrator import TestOrchestrator
+from core.test_orchestrator import CRUDTestOrchestrator
 from config import get_config
 
 
@@ -52,7 +52,7 @@ class UnifiedTestRunner:
         print("🔍 Testing Connectivity & Authentication...")
         
         try:
-            orch = TestOrchestrator()
+            orch = CRUDTestOrchestrator()
             await orch.setup()
             
             # Test OAuth token generation (skip in test environment)
@@ -265,7 +265,7 @@ class UnifiedTestRunner:
             
         print("\n🧹 Cleaning up test data...")
         try:
-            orch = TestOrchestrator()
+            orch = CRUDTestOrchestrator()
             await orch.setup()
             cleanup_count = await orch.db_validator.cleanup_test_data(self.test_config.test_data_prefix)
             print(f"   ✅ Cleaned up {cleanup_count} test records")

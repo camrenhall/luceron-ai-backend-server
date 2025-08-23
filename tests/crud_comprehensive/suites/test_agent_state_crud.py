@@ -11,14 +11,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.test_orchestrator import TestOrchestrator
+from core.test_orchestrator import CRUDTestOrchestrator
 
 
 @pytest.mark.crud
 class TestAgentConversationsCRUD:
     """Complete CRUD testing for agent_conversations table"""
     
-    async def test_agent_conversations_full_crud_cycle(self, clean_orchestrator: TestOrchestrator):
+    async def test_agent_conversations_full_crud_cycle(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test complete CREATE → READ → UPDATE → DELETE cycle for conversations"""
         orch = clean_orchestrator
         
@@ -97,7 +97,7 @@ class TestAgentConversationsCRUD:
 class TestAgentMessagesCRUD:
     """Complete CRUD testing for agent_messages table"""
     
-    async def test_agent_messages_full_crud_cycle(self, clean_orchestrator: TestOrchestrator):
+    async def test_agent_messages_full_crud_cycle(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test complete message CRUD cycle with conversation dependency"""
         orch = clean_orchestrator
         
@@ -166,7 +166,7 @@ class TestAgentMessagesCRUD:
         
         assert delete_result.success, f"Message delete failed: {delete_result.errors}"
     
-    async def test_conversation_history_endpoint(self, clean_orchestrator: TestOrchestrator):
+    async def test_conversation_history_endpoint(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test conversation history retrieval - CRITICAL endpoint"""
         orch = clean_orchestrator
         
@@ -195,7 +195,7 @@ class TestAgentMessagesCRUD:
 class TestAgentSummariesCRUD:
     """Complete CRUD testing for agent_summaries table"""
     
-    async def test_agent_summaries_full_crud_cycle(self, clean_orchestrator: TestOrchestrator):
+    async def test_agent_summaries_full_crud_cycle(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test complete summary CRUD cycle"""
         orch = clean_orchestrator
         
@@ -269,7 +269,7 @@ class TestAgentSummariesCRUD:
         
         assert delete_result.success, f"Summary delete failed: {delete_result.errors}"
     
-    async def test_latest_summary_endpoint(self, clean_orchestrator: TestOrchestrator):
+    async def test_latest_summary_endpoint(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test get latest summary - CRITICAL functionality"""
         orch = clean_orchestrator
         
@@ -302,7 +302,7 @@ class TestAgentSummariesCRUD:
 class TestAgentContextCRUD:
     """Complete CRUD testing for agent_context table"""
     
-    async def test_agent_context_full_crud_cycle(self, clean_orchestrator: TestOrchestrator):
+    async def test_agent_context_full_crud_cycle(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test complete context CRUD cycle with case dependency"""
         orch = clean_orchestrator
         
@@ -369,7 +369,7 @@ class TestAgentContextCRUD:
         
         assert delete_result.success, f"Context delete failed: {delete_result.errors}"
     
-    async def test_case_agent_context_endpoints(self, clean_orchestrator: TestOrchestrator):
+    async def test_case_agent_context_endpoints(self, clean_orchestrator: CRUDTestOrchestrator):
         """Test case-specific context retrieval - CRITICAL functionality"""
         orch = clean_orchestrator
         
