@@ -23,11 +23,11 @@ class TestConfig:
     
     
     # QA Database Configuration
-    qa_database_url: str = os.getenv('QA_DATABASE_URL', 'postgresql://qa_user:qa_pass@qa-database:5432/qa_luceron_db')
-    qa_api_base_url: str = os.getenv('QA_API_BASE_URL', 'https://qa-api.luceron.ai')
+    qa_database_url: str = os.getenv('QA_DATABASE_URL') or os.getenv('QA_DATABASE_STRING')
+    qa_api_base_url: str = os.getenv('QA_API_BASE_URL')
     
-    # API Endpoints - Default to QA environment
-    api_base_url: str = os.getenv('QA_API_BASE_URL', 'https://qa-api.luceron.ai')
+    # API Endpoints - Default to QA environment  
+    api_base_url: str = os.getenv('QA_API_BASE_URL')
     
     # OAuth Configuration
     oauth_service_id: str = os.getenv('OAUTH_SERVICE_ID', 'test_service')
@@ -59,12 +59,15 @@ class TestConfig:
         if not self.database_url:
             errors.append("DATABASE_URL is required")
             
+        if not self.qa_database_url:
+            errors.append("QA_DATABASE_URL or QA_DATABASE_STRING is required")
+            
+        if not self.qa_api_base_url:
+            errors.append("QA_API_BASE_URL is required")
+            
         # Only require OAuth key in production-like environments
         if not self.oauth_private_key and os.getenv('ENVIRONMENT') not in ['test', 'testing']:
             errors.append("OAUTH_PRIVATE_KEY is required")
-            
-        if not self.api_base_url:
-            errors.append("AGENT_DB_BASE_URL is required")
             
         return errors
 

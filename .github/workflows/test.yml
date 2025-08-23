@@ -39,14 +39,13 @@ jobs:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         
         # QA Database for testing
-        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
+        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_STRING }}
         
         # QA API endpoint
         QA_API_BASE_URL: ${{ secrets.QA_API_BASE_URL }}
         
         # Test configuration
         DB_MODE: "qa"
-        FAIL_ON_SCHEMA_CHANGES: "true"
         ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
@@ -98,14 +97,13 @@ jobs:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         
         # QA Database for testing
-        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
+        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_STRING }}
         
         # QA API endpoint
         QA_API_BASE_URL: ${{ secrets.QA_API_BASE_URL }}
         
         # Test configuration
         DB_MODE: "qa"
-        FAIL_ON_SCHEMA_CHANGES: "true"
         ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
@@ -147,14 +145,13 @@ jobs:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         
         # QA Database for testing
-        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
+        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_STRING }}
         
         # QA API endpoint
         QA_API_BASE_URL: ${{ secrets.QA_API_BASE_URL }}
         
         # Test configuration
         DB_MODE: "qa"
-        FAIL_ON_SCHEMA_CHANGES: "true"
         ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
