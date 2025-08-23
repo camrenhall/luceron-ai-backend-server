@@ -52,6 +52,10 @@ async def create_message(
                 raise HTTPException(status_code=404, detail=result.error)
             elif result.error_type == "CONFLICT":
                 raise HTTPException(status_code=409, detail=result.error)
+            elif result.error_type in ["INVALID_QUERY", "UNAUTHORIZED_FIELD", "RESOURCE_NOT_FOUND", "UNAUTHORIZED_OPERATION"]:
+                raise HTTPException(status_code=400, detail=result.error)
+            elif result.error_type == "FOREIGN_KEY_ERROR":
+                raise HTTPException(status_code=400, detail=result.error)
             else:
                 raise HTTPException(status_code=500, detail=result.error)
         
@@ -100,6 +104,8 @@ async def get_message(
         if not result.success:
             if result.error_type == "NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Message not found")
+            elif result.error_type in ["INVALID_QUERY", "UNAUTHORIZED_FIELD", "RESOURCE_NOT_FOUND", "UNAUTHORIZED_OPERATION"]:
+                raise HTTPException(status_code=400, detail=result.error)
             else:
                 raise HTTPException(status_code=500, detail=result.error)
         
@@ -161,6 +167,10 @@ async def update_message(
                 raise HTTPException(status_code=404, detail="Message not found")
             elif result.error_type == "CONFLICT":
                 raise HTTPException(status_code=409, detail=result.error)
+            elif result.error_type in ["INVALID_QUERY", "UNAUTHORIZED_FIELD", "RESOURCE_NOT_FOUND", "UNAUTHORIZED_OPERATION"]:
+                raise HTTPException(status_code=400, detail=result.error)
+            elif result.error_type == "FOREIGN_KEY_ERROR":
+                raise HTTPException(status_code=400, detail=result.error)
             else:
                 raise HTTPException(status_code=500, detail=result.error)
         
@@ -209,6 +219,10 @@ async def delete_message(
         if not result.success:
             if result.error_type == "NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Message not found")
+            elif result.error_type in ["INVALID_QUERY", "UNAUTHORIZED_FIELD", "RESOURCE_NOT_FOUND", "UNAUTHORIZED_OPERATION"]:
+                raise HTTPException(status_code=400, detail=result.error)
+            elif result.error_type == "FOREIGN_KEY_ERROR":
+                raise HTTPException(status_code=400, detail=result.error)
             else:
                 raise HTTPException(status_code=500, detail=result.error)
         
@@ -241,7 +255,10 @@ async def list_messages(
         )
         
         if not result.success:
-            raise HTTPException(status_code=500, detail=result.error)
+            if result.error_type in ["INVALID_QUERY", "UNAUTHORIZED_FIELD", "RESOURCE_NOT_FOUND", "UNAUTHORIZED_OPERATION"]:
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
         
         # Convert data to response models
         messages = []
@@ -289,6 +306,8 @@ async def get_conversation_messages(
         if not result.success:
             if result.error_type == "NOT_FOUND":
                 raise HTTPException(status_code=404, detail="Conversation not found")
+            elif result.error_type in ["INVALID_QUERY", "UNAUTHORIZED_FIELD", "RESOURCE_NOT_FOUND", "UNAUTHORIZED_OPERATION"]:
+                raise HTTPException(status_code=400, detail=result.error)
             else:
                 raise HTTPException(status_code=500, detail=result.error)
         

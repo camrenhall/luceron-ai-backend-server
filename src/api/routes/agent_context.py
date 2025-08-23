@@ -93,7 +93,15 @@ async def get_context(
     try:
         result = await context_service.get_context_by_id(context_id)
         
-        if not result.success or not result.data:
+        if not result.success:
+            if result.error_type == "NOT_FOUND":
+                raise HTTPException(status_code=404, detail="Context not found or expired")
+            elif result.error_type in ["INVALID_QUERY", "UNAUTHORIZED_FIELD", "RESOURCE_NOT_FOUND", "UNAUTHORIZED_OPERATION"]:
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        if not result.data:
             raise HTTPException(status_code=404, detail="Context not found or expired")
         
         context_data = result.data[0]
@@ -306,7 +314,15 @@ async def get_specific_context_value(
     try:
         result = await context_service.get_context_by_key_non_expired(case_id, agent_type.value, context_key)
         
-        if not result.success or not result.data:
+        if not result.success:
+            if result.error_type == "NOT_FOUND":
+                raise HTTPException(status_code=404, detail="Context not found or expired")
+            elif result.error_type in ["INVALID_QUERY", "UNAUTHORIZED_FIELD", "RESOURCE_NOT_FOUND", "UNAUTHORIZED_OPERATION"]:
+                raise HTTPException(status_code=400, detail=result.error)
+            else:
+                raise HTTPException(status_code=500, detail=result.error)
+        
+        if not result.data:
             raise HTTPException(status_code=404, detail="Context not found or expired")
         
         context_data = result.data[0]

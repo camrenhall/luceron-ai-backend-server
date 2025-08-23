@@ -3,7 +3,9 @@ Agent services - business logic for AI agent operations and context management
 """
 
 import logging
+import json
 from typing import Dict, Any, List, Optional
+from pydantic import ValidationError
 from services.base_service import BaseService, ServiceResult
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,30 @@ class AgentContextService(BaseService):
         Returns:
             ServiceResult with created/updated context data
         """
+        # Validate case exists
+        case_validation = await self._validate_case_exists(case_id)
+        if not case_validation:
+            return ServiceResult(
+                success=False, 
+                error=f"Case {case_id} not found", 
+                error_type="NOT_FOUND"
+            )
+        
+        # Validate and serialize context_value
+        try:
+            if isinstance(context_value, dict):
+                # Ensure context_value is properly serializable
+                import json
+                json.dumps(context_value)  # Test serialization
+            else:
+                context_value = {"value": str(context_value)}
+        except Exception as e:
+            return ServiceResult(
+                success=False,
+                error=f"Invalid context_value format: {e}",
+                error_type="VALIDATION_ERROR"
+            )
+        
         context_data = {
             "case_id": case_id,
             "agent_type": agent_type,
@@ -46,7 +72,38 @@ class AgentContextService(BaseService):
             context_data["expires_at"] = expires_at
         
         logger.info(f"Creating context for {agent_type} agent - case {case_id}, key: {context_key}")
-        return await self.create(context_data)
+        
+        try:
+            result = await self.create(context_data)
+            return result
+        except Exception as e:
+            # Enhanced error handling
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg or "violates foreign key constraint" in error_msg:
+                return ServiceResult(
+                    success=False, 
+                    error="Referenced record not found", 
+                    error_type="FOREIGN_KEY_ERROR"
+                )
+            elif "unique" in error_msg or "duplicate key" in error_msg:
+                return ServiceResult(
+                    success=False, 
+                    error="Record already exists", 
+                    error_type="DUPLICATE_ERROR"
+                )
+            elif "check constraint" in error_msg or "constraint" in error_msg:
+                return ServiceResult(
+                    success=False, 
+                    error=f"Database constraint violation: {e}", 
+                    error_type="CONSTRAINT_ERROR"
+                )
+            else:
+                logger.error(f"Unexpected error in {self.__class__.__name__}.create_context: {e}", exc_info=True)
+                return ServiceResult(
+                    success=False, 
+                    error="Internal server error", 
+                    error_type="INTERNAL_ERROR"
+                )
     
     async def get_context_by_id(self, context_id: str) -> ServiceResult:
         """Get context by ID"""
@@ -311,6 +368,18 @@ class AgentContextService(BaseService):
                 limit=limit,
                 offset=offset
             )
+    
+    async def _validate_case_exists(self, case_id: str) -> bool:
+        """Validate that case exists"""
+        try:
+            # Use cases service to check if case exists
+            from services.cases_service import CasesService
+            cases_service = CasesService()
+            result = await cases_service.get_by_id(case_id)
+            return result.success and result.data and len(result.data) > 0
+        except Exception as e:
+            logger.warning(f"Failed to validate case {case_id}: {e}")
+            return False
 
 class AgentConversationsService(BaseService):
     """Service for agent conversation management"""
@@ -412,8 +481,7 @@ class AgentMessagesService(BaseService):
         """
         # Auto-generate sequence number if not provided
         if sequence_number is None:
-            existing_messages = await self.get_messages_by_conversation(conversation_id)
-            sequence_number = existing_messages.count + 1 if existing_messages.success else 1
+            sequence_number = await self._get_next_sequence_number(conversation_id)
         
         message_data = {
             "conversation_id": conversation_id,
@@ -436,7 +504,57 @@ class AgentMessagesService(BaseService):
             message_data["function_response"] = function_response
         
         logger.info(f"Creating {role} message for conversation {conversation_id}")
-        return await self.create(message_data)
+        
+        try:
+            result = await self.create(message_data)
+            return result
+        except Exception as e:
+            # Enhanced error handling
+            error_msg = str(e).lower()
+            if "foreign key" in error_msg or "violates foreign key constraint" in error_msg:
+                return ServiceResult(
+                    success=False, 
+                    error="Referenced conversation not found", 
+                    error_type="FOREIGN_KEY_ERROR"
+                )
+            elif "unique" in error_msg or "duplicate key" in error_msg:
+                return ServiceResult(
+                    success=False, 
+                    error="Message sequence conflict", 
+                    error_type="DUPLICATE_ERROR"
+                )
+            elif "check constraint" in error_msg or "constraint" in error_msg:
+                return ServiceResult(
+                    success=False, 
+                    error=f"Database constraint violation: {e}", 
+                    error_type="CONSTRAINT_ERROR"
+                )
+            else:
+                logger.error(f"Unexpected error in {self.__class__.__name__}.create_message: {e}", exc_info=True)
+                return ServiceResult(
+                    success=False, 
+                    error="Internal server error", 
+                    error_type="INTERNAL_ERROR"
+                )
+
+    async def _get_next_sequence_number(self, conversation_id: str) -> int:
+        """Get next sequence number for message in conversation"""
+        try:
+            # Get all messages for this conversation and find max sequence number
+            result = await self.read(
+                fields=["sequence_number"],
+                filters={"conversation_id": conversation_id},
+                order_by=[{"field": "sequence_number", "dir": "desc"}],
+                limit=1
+            )
+            if result.success and result.data and len(result.data) > 0:
+                max_sequence = result.data[0].get("sequence_number", 0)
+                return (max_sequence or 0) + 1
+            return 1
+        except Exception as e:
+            # Log error and default to 1
+            logger.warning(f"Failed to get sequence number for conversation {conversation_id}: {e}")
+            return 1
     
     async def get_message_by_id(self, message_id: str) -> ServiceResult:
         """Get message by ID"""

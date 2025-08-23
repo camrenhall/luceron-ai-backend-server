@@ -76,12 +76,36 @@ class BaseService:
             )
             
         except Exception as e:
-            logger.error(f"Create operation failed for {self.resource_name}: {e}")
-            return ServiceResult(
-                success=False,
-                error=str(e),
-                error_type="EXECUTION_ERROR"
-            )
+            # Enhanced error logging and handling
+            logger.error(f"Create operation failed for {self.resource_name}: {e}", exc_info=True)
+            
+            error_msg = str(e).lower()
+            if "runtimeerror" in error_msg and "database" in error_msg:
+                # Handle database-specific errors
+                if "conflict" in error_msg or "unique constraint" in error_msg:
+                    return ServiceResult(
+                        success=False,
+                        error="Record already exists",
+                        error_type="CONFLICT_ERROR"
+                    )
+                elif "foreign key" in error_msg:
+                    return ServiceResult(
+                        success=False,
+                        error="Referenced record not found",
+                        error_type="FOREIGN_KEY_ERROR"
+                    )
+                else:
+                    return ServiceResult(
+                        success=False,
+                        error=f"Database operation failed: {e}",
+                        error_type="DATABASE_ERROR"
+                    )
+            else:
+                return ServiceResult(
+                    success=False,
+                    error=str(e),
+                    error_type="EXECUTION_ERROR"
+                )
     
     async def read(
         self,
@@ -231,12 +255,28 @@ class BaseService:
             )
             
         except Exception as e:
-            logger.error(f"Update operation failed for {self.resource_name}: {e}")
-            return ServiceResult(
-                success=False,
-                error=str(e),
-                error_type="EXECUTION_ERROR"
-            )
+            # Enhanced error logging and handling for updates
+            logger.error(f"Update operation failed for {self.resource_name}: {e}", exc_info=True)
+            
+            error_msg = str(e).lower()
+            if "not found" in error_msg or "no rows affected" in error_msg:
+                return ServiceResult(
+                    success=False,
+                    error=f"Record with id {record_id} not found",
+                    error_type="NOT_FOUND"
+                )
+            elif "foreign key" in error_msg:
+                return ServiceResult(
+                    success=False,
+                    error="Referenced record not found",
+                    error_type="FOREIGN_KEY_ERROR"
+                )
+            else:
+                return ServiceResult(
+                    success=False,
+                    error=str(e),
+                    error_type="EXECUTION_ERROR"
+                )
     
     async def get_by_id(self, record_id: str) -> ServiceResult:
         """
@@ -416,6 +456,11 @@ class BaseService:
                 
                 try:
                     row = await conn.fetchrow(query, *params)
+                    
+                    # CRITICAL: Verify row was actually inserted
+                    if not row:
+                        raise RuntimeError("Insert operation failed - no data returned")
+                    
                     data = [dict(row)]
                     
                     # Convert datetime objects to ISO strings
@@ -423,6 +468,17 @@ class BaseService:
                         for key, value in row_dict.items():
                             if hasattr(value, 'isoformat'):
                                 row_dict[key] = value.isoformat()
+                    
+                    # Double-check: verify record exists in database
+                    table_name = self._get_table_name(operation.resource)
+                    id_field = self._get_id_field(operation.resource)
+                    record_id = row[id_field]
+                    
+                    verify_query = f"SELECT 1 FROM {table_name} WHERE {id_field} = $1"
+                    verification = await conn.fetchrow(verify_query, record_id)
+                    
+                    if not verification:
+                        raise RuntimeError("Insert operation failed - record not found after insertion")
                     
                     return {
                         "data": data,
@@ -435,6 +491,36 @@ class BaseService:
                 except asyncpg.PostgresError as e:
                     logger.error(f"Database error during INSERT: {e}")
                     raise RuntimeError(f"Database INSERT failed: {str(e)}")
+    
+    def _get_table_name(self, resource: str) -> str:
+        """Get table name for resource"""
+        resource_tables = {
+            "cases": "cases",
+            "client_communications": "client_communications", 
+            "documents": "documents",
+            "document_analysis": "document_analysis",
+            "error_logs": "error_logs",
+            "agent_context": "agent_context",
+            "agent_conversations": "agent_conversations",
+            "agent_messages": "agent_messages",
+            "agent_summaries": "agent_summaries"
+        }
+        return resource_tables.get(resource, resource)
+    
+    def _get_id_field(self, resource: str) -> str:
+        """Get ID field name for resource"""
+        id_fields = {
+            "cases": "case_id",
+            "client_communications": "communication_id",
+            "documents": "document_id",
+            "document_analysis": "analysis_id",
+            "error_logs": "error_id",
+            "agent_context": "context_id",
+            "agent_conversations": "conversation_id",
+            "agent_messages": "message_id",
+            "agent_summaries": "summary_id"
+        }
+        return id_fields.get(resource, "id")
     
     async def _execute_update_sql(self, dsl: DSL) -> Dict[str, Any]:
         """Execute UPDATE DSL directly via SQL"""

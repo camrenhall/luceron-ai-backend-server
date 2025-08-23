@@ -105,10 +105,19 @@ class TestDocumentsCRUD:
         await orch.execute_create("documents", "/api/documents", doc1_data)
         await orch.execute_create("documents", "/api/documents", doc2_data)
         
-        # Test batch lookup
+        # Test batch lookup with correct API contract
         lookup_data = {
-            "filenames": ["test_batch_1.pdf", "test_batch_2.pdf"],
-            "case_id": case_result.uuid
+            "batch_id": "test_batch_123",
+            "processed_files": [
+                {
+                    "file_key": "processed/test_batch_1.pdf",
+                    "original_filename_pattern": "test_batch_1.pdf"
+                },
+                {
+                    "file_key": "processed/test_batch_2.pdf", 
+                    "original_filename_pattern": "test_batch_2.pdf"
+                }
+            ]
         }
         
         response, duration = await orch.time_operation(
@@ -131,15 +140,14 @@ class TestDocumentsCRUD:
         doc_result = await orch.execute_create("documents", "/api/documents", doc_data)
         assert doc_result.success
         
-        # Test analysis storage
+        # Test analysis storage with correct API contract
         analysis_data = {
-            "analysis_content": {
-                "summary": "Test analysis summary",
-                "key_findings": ["Finding 1", "Finding 2"],
-                "confidence": 0.95
-            },
+            "document_id": doc_result.uuid,
+            "case_id": case_result.uuid,
+            "analysis_content": '{"summary": "Test analysis summary", "key_findings": ["Finding 1", "Finding 2"], "confidence": 0.95}',
             "model_used": "gpt-4-turbo",
-            "tokens_used": 150
+            "tokens_used": 150,
+            "analysis_status": "COMPLETED"
         }
         
         response, duration = await orch.time_operation(
