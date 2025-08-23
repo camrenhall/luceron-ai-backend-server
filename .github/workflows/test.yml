@@ -32,7 +32,7 @@ jobs:
       run: |
         cd tests/crud_comprehensive
         # Build the main application
-        docker build -t luceron-api:test ../../..
+        docker build -t luceron-api:test .
         
         # Start test database
         docker run -d \
@@ -113,7 +113,7 @@ jobs:
       run: |
         cd tests/crud_comprehensive
         # Build the main application
-        docker build -t luceron-api:test ../../..
+        docker build -t luceron-api:test .
         
         # Start test database
         docker run -d \
@@ -195,7 +195,7 @@ jobs:
       run: |
         cd tests/crud_comprehensive
         # Build the main application
-        docker build -t luceron-api:test ../../..
+        docker build -t luceron-api:test .
         
         # Start test database
         docker run -d \
