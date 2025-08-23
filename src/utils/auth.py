@@ -34,10 +34,10 @@ class AgentAuthContext:
 
 async def authenticate_api(authorization: Optional[str] = Header(None)) -> AuthContext:
     """
-    FastAPI dependency for Bearer token authentication.
+    FastAPI dependency for JWT Bearer token authentication.
     
     Args:
-        authorization: Authorization header with Bearer token
+        authorization: Authorization header with Bearer JWT token
         
     Returns:
         AuthContext: Authentication context with role information
@@ -45,10 +45,7 @@ async def authenticate_api(authorization: Optional[str] = Header(None)) -> AuthC
     Raises:
         HTTPException: 401 if authentication fails
     """
-    logger.info(f"AUTH: Starting authentication check")
-    logger.info(f"AUTH: Authorization header present: {authorization is not None}")
-    if authorization:
-        logger.info(f"AUTH: Authorization header value: '{authorization[:20]}...' (first 20 chars)")
+    logger.info(f"AUTH: Starting JWT authentication check")
     
     if not authorization:
         logger.error("AUTH: API request missing Authorization header - returning 401")
@@ -58,42 +55,36 @@ async def authenticate_api(authorization: Optional[str] = Header(None)) -> AuthC
         )
     
     if not authorization.startswith("Bearer "):
-        logger.error(f"AUTH: Invalid Authorization header format: '{authorization}' - returning 401")
+        logger.error(f"AUTH: Invalid Authorization header format - returning 401")
         raise HTTPException(
             status_code=401, 
             detail="Invalid authorization header format. Expected 'Bearer <token>'"
         )
     
     token = authorization[7:]  # Remove "Bearer " prefix
-    logger.info(f"AUTH: Extracted token: '{token[:8]}...' (first 8 chars)")
+    logger.info(f"AUTH: Extracted JWT token: '{token[:8]}...' (first 8 chars)")
     
-    if not API_KEY:
-        logger.error("AUTH: API_KEY environment variable not configured - returning 500")
-        raise HTTPException(
-            status_code=500,
-            detail="Server authentication not configured"
+    try:
+        # Validate JWT token and extract claims
+        jwt_payload = validate_agent_jwt(token)
+        agent_role = jwt_payload['sub']
+        service_id = jwt_payload.get('service_id', 'unknown')
+        
+        logger.info(f"AUTH: JWT validation successful for agent: {agent_role}, service: {service_id}")
+        
+        # Create backward-compatible AuthContext
+        return AuthContext(
+            is_authenticated=True,
+            role=agent_role,
+            actor_id=service_id
         )
-    
-    logger.info(f"AUTH: Comparing with configured API_KEY: '{API_KEY[:8] if API_KEY else 'NONE'}...' (first 8 chars)")
-    if token != API_KEY:
-        logger.error(f"AUTH: Invalid token provided: '{token[:8]}...' - returning 401")
-        raise HTTPException(
-            status_code=401, 
-            detail="Invalid API key"
-        )
-    
-    logger.info("AUTH: Authentication successful")
-    
-    # For MVP, we'll extract role from the token itself or use default
-    # In future: decode JWT, query database, etc.
-    role = "default"
-    actor_id = "api_client"  # Could be extracted from token in future
-    
-    return AuthContext(
-        is_authenticated=True,
-        role=role,
-        actor_id=actor_id
-    )
+        
+    except jwt.InvalidTokenError as e:
+        logger.error(f"AUTH: Invalid JWT token: {str(e)}")
+        raise HTTPException(401, "Invalid JWT token")
+    except Exception as e:
+        logger.error(f"AUTH: JWT authentication error: {str(e)}")
+        raise HTTPException(401, "JWT authentication failed")
 
 
 async def authenticate_agent_jwt(
@@ -173,7 +164,7 @@ class AuthConfig:
     
     @staticmethod
     def is_auth_enabled() -> bool:
-        """Authentication is always enabled - API_KEY is required"""
+        """Authentication is always enabled - JWT tokens are required"""
         return True
     
     @staticmethod
