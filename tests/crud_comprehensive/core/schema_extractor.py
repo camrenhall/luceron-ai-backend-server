@@ -334,17 +334,35 @@ class SchemaExtractor:
             if pk["column_name"]:
                 columns.append(f'CONSTRAINT "{pk["constraint_name"]}" PRIMARY KEY ("{pk["column_name"]}")')
         
-        # Add unique constraints
+        # Add unique constraints with collision-safe naming
         unique_constraints = [c for c in table_schema.constraints if c["constraint_type"] == "UNIQUE"]
-        for uc in unique_constraints:
+        unique_names_used = set()
+        for i, uc in enumerate(unique_constraints):
             if uc["column_name"]:
-                columns.append(f'CONSTRAINT "{uc["constraint_name"]}" UNIQUE ("{uc["column_name"]}")')
+                # Generate unique constraint name to avoid collisions
+                base_name = uc["constraint_name"]
+                if base_name in unique_names_used:
+                    # Append column name and index to make it unique
+                    safe_name = f"{base_name}_{uc['column_name']}_{i}"
+                else:
+                    safe_name = base_name
+                unique_names_used.add(safe_name)
+                columns.append(f'CONSTRAINT "{safe_name}" UNIQUE ("{uc["column_name"]}")')
         
-        # Add check constraints
+        # Add check constraints with collision-safe naming
         check_constraints = [c for c in table_schema.constraints if c["constraint_type"] == "CHECK"]
-        for cc in check_constraints:
+        check_names_used = set()
+        for i, cc in enumerate(check_constraints):
             if cc["check_clause"]:
-                columns.append(f'CONSTRAINT "{cc["constraint_name"]}" CHECK ({cc["check_clause"]})')
+                # Generate unique constraint name to avoid collisions
+                base_name = cc["constraint_name"]
+                if base_name in check_names_used:
+                    # Append index to make it unique
+                    safe_name = f"{base_name}_{i}"
+                else:
+                    safe_name = base_name
+                check_names_used.add(safe_name)
+                columns.append(f'CONSTRAINT "{safe_name}" CHECK ({cc["check_clause"]})')
         
         column_definitions = ",\n    ".join(columns)
         return f'CREATE TABLE "{table_schema.table_name}" (\n    {column_definitions}\n);'
