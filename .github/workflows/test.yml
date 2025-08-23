@@ -63,16 +63,7 @@ jobs:
           luceron-api:test
         
         # Wait for API to be ready
-        echo "Waiting for API to start..."
-        sleep 10
-        echo "Checking API container logs:"
-        docker logs test-api
-        echo "Attempting health check..."
-        timeout 60s bash -c 'until curl -f http://localhost:8080/; do echo "Health check failed, retrying..."; sleep 2; done' || {
-          echo "Health check timed out. Final container logs:"
-          docker logs test-api
-          exit 1
-        }
+        timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
     
     - name: Run smoke tests (Fully Isolated)
       env:
@@ -85,6 +76,8 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
+        OAUTH_PRIVATE_KEY: "dummy_oauth_key_for_testing"
+        OAUTH_PRIVATE_KEY: "dummy_oauth_key_for_testing"
         
       run: |
         cd tests/crud_comprehensive
@@ -154,16 +147,7 @@ jobs:
           luceron-api:test
         
         # Wait for API to be ready
-        echo "Waiting for API to start..."
-        sleep 10
-        echo "Checking API container logs:"
-        docker logs test-api
-        echo "Attempting health check..."
-        timeout 60s bash -c 'until curl -f http://localhost:8080/; do echo "Health check failed, retrying..."; sleep 2; done' || {
-          echo "Health check timed out. Final container logs:"
-          docker logs test-api
-          exit 1
-        }
+        timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
     
     - name: Run regression tests (Fully Isolated)
       env:
@@ -176,6 +160,7 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
+        OAUTH_PRIVATE_KEY: "dummy_oauth_key_for_testing"
         
       run: |
         cd tests/crud_comprehensive
@@ -246,16 +231,7 @@ jobs:
           luceron-api:test
         
         # Wait for API to be ready
-        echo "Waiting for API to start..."
-        sleep 10
-        echo "Checking API container logs:"
-        docker logs test-api
-        echo "Attempting health check..."
-        timeout 60s bash -c 'until curl -f http://localhost:8080/; do echo "Health check failed, retrying..."; sleep 2; done' || {
-          echo "Health check timed out. Final container logs:"
-          docker logs test-api
-          exit 1
-        }
+        timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
     
     - name: Run parallel tests (Fully Isolated)
       env:
@@ -268,6 +244,7 @@ jobs:
         # Test configuration
         DB_MODE: "isolated"
         FAIL_ON_SCHEMA_CHANGES: "true"
+        OAUTH_PRIVATE_KEY: "dummy_oauth_key_for_testing"
         
       run: |
         cd tests/crud_comprehensive
