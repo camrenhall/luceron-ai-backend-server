@@ -59,7 +59,8 @@ class TestConfig:
         if not self.database_url:
             errors.append("DATABASE_URL is required")
             
-        if not self.oauth_private_key:
+        # Only require OAuth key in production-like environments
+        if not self.oauth_private_key and os.getenv('ENVIRONMENT') not in ['test', 'testing']:
             errors.append("OAUTH_PRIVATE_KEY is required")
             
         if not self.api_base_url:
