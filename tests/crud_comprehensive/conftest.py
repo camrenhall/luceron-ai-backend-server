@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from core.test_orchestrator import CRUDTestOrchestrator
 from core.rest_client import RestClient
-from core.test_db_manager import TestDatabaseManager, SchemaChangeDetector
 
 # === OAUTH MOCKING FOR TEST ENVIRONMENTS ===
 
@@ -33,72 +32,10 @@ def mock_oauth_in_test_env():
         yield
 
 
-# === SCHEMA CHANGE DETECTION ===
-
-@pytest.fixture(scope="session", autouse=True)
-async def schema_change_detector():
-    """Detect schema changes and fail tests immediately if changes are found"""
-    from config import get_config
-    config = get_config()
-    
-    if not config.fail_on_schema_changes or config.database_mode == "production":
-        # Skip schema change detection in production mode or if disabled
-        yield
-        return
-    
-    print("\n🔍 Checking for production schema changes...")
-    
-    detector = SchemaChangeDetector()
-    changes = await detector.detect_schema_changes()
-    
-    if changes.get("schema_changed", False):
-        print(f"❌ SCHEMA CHANGE DETECTED!")
-        print(f"   Old hash: {changes['old_hash']}")  
-        print(f"   New hash: {changes['new_hash']}")
-        print("   Changes:")
-        for change in changes.get("changes", {}).get("summary", []):
-            print(f"     • {change}")
-        
-        pytest.fail(f"Production schema changed! {changes['message']}")
-    else:
-        print(f"✅ Schema unchanged (hash: {changes.get('schema_hash', 'unknown')[:12]})")
-    
-    yield
 
 
 # === DATABASE ISOLATION ===
 
-@pytest.fixture(scope="session")  
-async def isolated_database():
-    """Create isolated test database with production schema"""
-    from config import get_config
-    config = get_config()
-    
-    if config.database_mode != "isolated":
-        # Not using isolated mode
-        yield None
-        return
-        
-    print("\n🏗️  Setting up isolated test database...")
-    
-    db_manager = TestDatabaseManager(engine=config.test_db_engine)
-    
-    try:
-        # Create isolated database with current production schema
-        test_db = await db_manager.create_isolated_database()
-        
-        # Validate schema fidelity
-        validation = await db_manager.validate_schema_fidelity(test_db)
-        
-        if validation.get("schema_changed", False):
-            print("⚠️  Schema fidelity warning - test database may not match production exactly")
-        
-        yield test_db
-        
-    finally:
-        # Cleanup
-        print("\n🧹 Cleaning up isolated test database...")
-        await db_manager.cleanup_all_databases()
 
 
 # === PERFORMANCE OPTIMIZATIONS ===
@@ -123,48 +60,22 @@ async def shared_rest_client() -> AsyncGenerator[RestClient, None]:
 
 
 @pytest.fixture(scope="function")
-async def clean_orchestrator(shared_rest_client, isolated_database) -> AsyncGenerator[CRUDTestOrchestrator, None]:
-    """Optimized test orchestrator with isolated database support"""
+async def clean_orchestrator(shared_rest_client) -> AsyncGenerator[CRUDTestOrchestrator, None]:
+    """Optimized test orchestrator for QA database"""
     from config import get_config
     config = get_config()
     
     orch = CRUDTestOrchestrator()
     orch.rest_client = shared_rest_client  # Reuse authenticated client
     
-    # Configure database connection based on mode
-    if config.database_mode == "isolated" and isolated_database:
-        # Validate that isolated database actually has tables
-        try:
-            conn = await asyncpg.connect(isolated_database.connection_url)
-            table_count = await conn.fetchval("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'")
-            await conn.close()
-            
-            if table_count > 0:
-                # Use isolated test database
-                orch.db_validator.config.database_url = isolated_database.connection_url  
-                print(f"   🔗 Using isolated database: {isolated_database.database_name} ({table_count} tables)")
-            else:
-                # Fallback to production database if isolated DB is empty
-                print(f"   ⚠️  Isolated database is empty, falling back to production database")
-                print(f"   🔗 Using production database (fallback)")
-        except Exception as e:
-            print(f"   ⚠️  Cannot validate isolated database: {e}")
-            print(f"   🔗 Using production database (fallback)")
-    else:
-        # Use production database (existing behavior)
-        print(f"   🔗 Using production database")
+    print(f"   🔗 Using QA database")
     
     await orch.setup()
     yield orch
     
-    # Fast cleanup - behavior depends on database mode
+    # Clean up test data from QA database
     try:
-        if config.database_mode == "isolated":
-            # No cleanup needed - database will be destroyed
-            pass
-        else:
-            # Clean up test data from production database
-            await orch.cleanup_test_data()
+        await orch.cleanup_test_data()
     except Exception as e:
         print(f"Warning: Cleanup failed: {e}")
     

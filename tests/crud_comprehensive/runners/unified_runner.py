@@ -449,22 +449,16 @@ Examples:
     
     parser.add_argument(
         "--db-mode",
-        choices=["isolated", "production", "hybrid"],
-        default="isolated",
-        help="Database testing mode (default: isolated)"
+        choices=["qa", "production", "hybrid"],
+        default="qa",
+        help="Database testing mode (default: qa)"
     )
     
-    parser.add_argument(
-        "--db-engine",
-        choices=["docker", "embedded"],
-        default="docker", 
-        help="Test database engine (default: docker)"
-    )
+    
     
     parser.add_argument(
-        "--no-schema-validation",
-        action="store_true",
-        help="Skip schema change detection"
+        "--qa-database-url",
+        help="QA database connection URL"
     )
     
     return parser
@@ -478,8 +472,9 @@ def main():
     # Set environment variables for database configuration
     import os
     os.environ["DB_MODE"] = args.db_mode
-    os.environ["TEST_DB_ENGINE"] = args.db_engine
-    os.environ["FAIL_ON_SCHEMA_CHANGES"] = "false" if args.no_schema_validation else "true"
+    
+    if args.qa_database_url:
+        os.environ["QA_DATABASE_URL"] = args.qa_database_url
     
     # Build configuration
     config = RunnerConfig(

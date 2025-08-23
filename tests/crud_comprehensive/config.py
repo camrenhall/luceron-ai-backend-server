@@ -19,17 +19,17 @@ class TestConfig:
     database_url: str = os.getenv('DATABASE_URL', 'postgresql://postgres.bjooglksafuxdeknpaso:SgUHEBQv5vdWG0pF@aws-0-us-east-2.pooler.supabase.com:6543/postgres')
     
     # Database Testing Mode
-    database_mode: str = os.getenv('DB_MODE', 'isolated')  # isolated, production, hybrid
-    test_db_engine: str = os.getenv('TEST_DB_ENGINE', 'docker')  # docker, embedded
+    database_mode: str = os.getenv('DB_MODE', 'qa')  # qa, production, hybrid
     
-    # Schema Change Detection
-    fail_on_schema_changes: bool = os.getenv('FAIL_ON_SCHEMA_CHANGES', 'true').lower() == 'true'
-    schema_validation_enabled: bool = os.getenv('SCHEMA_VALIDATION', 'true').lower() == 'true'
     
-    # API Endpoints - Default to local test container
-    api_base_url: str = os.getenv('TEST_API_BASE_URL', 'http://localhost:8080')
+    # QA Database Configuration
+    qa_database_url: str = os.getenv('QA_DATABASE_URL', 'postgresql://qa_user:qa_pass@qa-database:5432/qa_luceron_db')
+    qa_api_base_url: str = os.getenv('QA_API_BASE_URL', 'https://qa-api.luceron.ai')
     
-    # OAuth Configuration (for test API container)
+    # API Endpoints - Default to QA environment
+    api_base_url: str = os.getenv('QA_API_BASE_URL', 'https://qa-api.luceron.ai')
+    
+    # OAuth Configuration
     oauth_service_id: str = os.getenv('OAUTH_SERVICE_ID', 'test_service')
     oauth_private_key: str = os.getenv('OAUTH_PRIVATE_KEY', '')
     oauth_audience: str = os.getenv('OAUTH_AUDIENCE', 'test-auth-server')

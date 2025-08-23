@@ -28,61 +28,31 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
     
-    - name: Build and start test environment
+    - name: Install dependencies
       run: |
-        # Build the main application
-        docker build -t luceron-api:test .
         cd tests/crud_comprehensive
-        
-        # Start test database
-        docker run -d \
-          --name test-database \
-          -e POSTGRES_DB=test_luceron_db \
-          -e POSTGRES_USER=test_user \
-          -e POSTGRES_PASSWORD=test_pass \
-          -p 5433:5432 \
-          --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=256m \
-          postgres:15
-        
-        # Wait for database to be ready
-        timeout 30s bash -c 'until docker exec test-database pg_isready -U test_user -d test_luceron_db; do sleep 1; done'
-        
-        # Start test API container
-        docker run -d \
-          --name test-api \
-          --link test-database:test-database \
-          -e DATABASE_URL="postgresql://test_user:test_pass@test-database:5432/test_luceron_db" \
-          -e RESEND_API_KEY="dummy_resend_key_for_testing" \
-          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
-          -e ENVIRONMENT="test" \
-          -e ENABLE_AUTH="false" \
-          -e ENABLE_EXTERNAL_APIS="false" \
-          -e LOG_LEVEL="INFO" \
-          -e CI="true" \
-          -p 8080:8080 \
-          luceron-api:test
-        
-        # Wait for API to be ready
-        timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
+        pip install -r requirements.txt
     
-    - name: Run smoke tests (Fully Isolated)
+    - name: Run smoke tests (QA Database)
       env:
         # Production DB for schema extraction only (READ-ONLY)
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         
-        # Test API endpoint (containerized)
-        TEST_API_BASE_URL: "http://localhost:8080"
+        # QA Database for testing
+        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
+        
+        # QA API endpoint
+        QA_API_BASE_URL: ${{ secrets.QA_API_BASE_URL }}
         
         # Test configuration
-        DB_MODE: "isolated"
+        DB_MODE: "qa"
         FAIL_ON_SCHEMA_CHANGES: "true"
         ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
       run: |
         cd tests/crud_comprehensive
-        pip install -r requirements.txt
-        python runners/unified_runner.py --mode smoke --db-mode isolated --output json --verbose || {
+        python runners/unified_runner.py --mode smoke --db-mode qa --output json --verbose || {
           echo "Tests failed, showing detailed pytest output:"
           if [ -f test-results.json ]; then
             echo "=== PYTEST RESULTS JSON ==="
@@ -94,12 +64,6 @@ jobs:
           fi
           exit 1
         }
-    
-    - name: Cleanup test containers
-      if: always()
-      run: |
-        docker stop test-api test-database || true
-        docker rm test-api test-database || true
     
     - name: Upload smoke test results
       uses: actions/upload-artifact@v4
@@ -123,67 +87,31 @@ jobs:
       with:
         python-version: '3.12'
     
-    - name: Build and start test environment
+    - name: Install dependencies
       run: |
-        # Build the main application
-        docker build -t luceron-api:test .
         cd tests/crud_comprehensive
-        
-        # Start test database
-        docker run -d \
-          --name test-database \
-          -e POSTGRES_DB=test_luceron_db \
-          -e POSTGRES_USER=test_user \
-          -e POSTGRES_PASSWORD=test_pass \
-          -p 5433:5432 \
-          --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=512m \
-          postgres:15
-        
-        # Wait for database to be ready
-        timeout 30s bash -c 'until docker exec test-database pg_isready -U test_user -d test_luceron_db; do sleep 1; done'
-        
-        # Start test API container
-        docker run -d \
-          --name test-api \
-          --link test-database:test-database \
-          -e DATABASE_URL="postgresql://test_user:test_pass@test-database:5432/test_luceron_db" \
-          -e RESEND_API_KEY="dummy_resend_key_for_testing" \
-          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
-          -e ENVIRONMENT="test" \
-          -e ENABLE_AUTH="false" \
-          -e ENABLE_EXTERNAL_APIS="false" \
-          -e LOG_LEVEL="INFO" \
-          -e CI="true" \
-          -p 8080:8080 \
-          luceron-api:test
-        
-        # Wait for API to be ready
-        timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
+        pip install -r requirements.txt
     
-    - name: Run regression tests (Fully Isolated)
+    - name: Run regression tests (QA Database)
       env:
         # Production DB for schema extraction only (READ-ONLY)
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         
-        # Test API endpoint (containerized)
-        TEST_API_BASE_URL: "http://localhost:8080"
+        # QA Database for testing
+        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
+        
+        # QA API endpoint
+        QA_API_BASE_URL: ${{ secrets.QA_API_BASE_URL }}
         
         # Test configuration
-        DB_MODE: "isolated"
+        DB_MODE: "qa"
         FAIL_ON_SCHEMA_CHANGES: "true"
         ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
       run: |
         cd tests/crud_comprehensive
-        pip install -r requirements.txt
-        python runners/unified_runner.py --mode regression --db-mode isolated --coverage --parallel --workers 2 --output json --verbose
-    
-    - name: Cleanup test containers
-      if: always()
-      run: |
-        docker stop test-api test-database || true
-        docker rm test-api test-database || true
+        python runners/unified_runner.py --mode regression --db-mode qa --coverage --parallel --workers 2 --output json --verbose
     
     - name: Upload regression test results
       uses: actions/upload-artifact@v4
@@ -208,67 +136,31 @@ jobs:
       with:
         python-version: '3.12'
     
-    - name: Build and start test environment
+    - name: Install dependencies
       run: |
-        # Build the main application
-        docker build -t luceron-api:test .
         cd tests/crud_comprehensive
-        
-        # Start test database
-        docker run -d \
-          --name test-database \
-          -e POSTGRES_DB=test_luceron_db \
-          -e POSTGRES_USER=test_user \
-          -e POSTGRES_PASSWORD=test_pass \
-          -p 5433:5432 \
-          --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=512m \
-          postgres:15
-        
-        # Wait for database to be ready
-        timeout 30s bash -c 'until docker exec test-database pg_isready -U test_user -d test_luceron_db; do sleep 1; done'
-        
-        # Start test API container
-        docker run -d \
-          --name test-api \
-          --link test-database:test-database \
-          -e DATABASE_URL="postgresql://test_user:test_pass@test-database:5432/test_luceron_db" \
-          -e RESEND_API_KEY="dummy_resend_key_for_testing" \
-          -e OPENAI_API_KEY="dummy_openai_key_for_testing" \
-          -e ENVIRONMENT="test" \
-          -e ENABLE_AUTH="false" \
-          -e ENABLE_EXTERNAL_APIS="false" \
-          -e LOG_LEVEL="INFO" \
-          -e CI="true" \
-          -p 8080:8080 \
-          luceron-api:test
-        
-        # Wait for API to be ready
-        timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
+        pip install -r requirements.txt
     
-    - name: Run parallel tests (Fully Isolated)
+    - name: Run parallel tests (QA Database)
       env:
         # Production DB for schema extraction only (READ-ONLY)
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         
-        # Test API endpoint (containerized)
-        TEST_API_BASE_URL: "http://localhost:8080"
+        # QA Database for testing
+        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
+        
+        # QA API endpoint
+        QA_API_BASE_URL: ${{ secrets.QA_API_BASE_URL }}
         
         # Test configuration
-        DB_MODE: "isolated"
+        DB_MODE: "qa"
         FAIL_ON_SCHEMA_CHANGES: "true"
         ENVIRONMENT: "test"
         OAUTH_PRIVATE_KEY: ""
         
       run: |
         cd tests/crud_comprehensive
-        pip install -r requirements.txt
-        python runners/unified_runner.py --mode full --db-mode isolated --coverage --parallel --workers auto --output json
-    
-    - name: Cleanup test containers
-      if: always()
-      run: |
-        docker stop test-api test-database || true
-        docker rm test-api test-database || true
+        python runners/unified_runner.py --mode full --db-mode qa --coverage --parallel --workers auto --output json
     
     - name: Upload parallel test results
       uses: actions/upload-artifact@v4
