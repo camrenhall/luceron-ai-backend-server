@@ -278,6 +278,52 @@ class BaseService:
             limit=limit
         )
     
+    async def delete(self, record_id: str) -> ServiceResult:
+        """
+        Delete a record by primary key
+        
+        Args:
+            record_id: Primary key value of record to delete
+            
+        Returns:
+            ServiceResult indicating success/failure
+        """
+        try:
+            # Find primary key field name
+            pk_field = self._find_primary_key_field()
+            if not pk_field:
+                return ServiceResult(
+                    success=False,
+                    error=f"Cannot identify primary key field for {self.resource_name}",
+                    error_type="CONFIGURATION_ERROR"
+                )
+            
+            # Get the record before deleting (for response data)
+            record_result = await self.get_by_id(record_id)
+            if not record_result.success or not record_result.data:
+                return ServiceResult(
+                    success=False,
+                    error=f"Record not found with ID: {record_id}",
+                    error_type="RESOURCE_NOT_FOUND"
+                )
+            
+            # Execute DELETE operation directly
+            result = await self._execute_delete_sql(record_id, pk_field)
+            
+            return ServiceResult(
+                success=True,
+                data=record_result.data,  # Return the deleted record data
+                count=result["count"]
+            )
+            
+        except Exception as e:
+            logger.error(f"Delete operation failed for {self.resource_name}: {e}")
+            return ServiceResult(
+                success=False,
+                error=str(e),
+                error_type="EXECUTION_ERROR"
+            )
+    
     def _find_primary_key_field(self) -> Optional[str]:
         """Find the primary key field for this resource"""
         # Look for fields ending with _id that are not writable (auto-generated)
@@ -431,6 +477,56 @@ class BaseService:
                     logger.error(f"Database error during UPDATE: {e}")
                     raise RuntimeError(f"Database UPDATE failed: {str(e)}")
     
+    async def _execute_delete_sql(self, record_id: str, pk_field: str) -> Dict[str, Any]:
+        """Execute DELETE operation directly via SQL"""
+        
+        db_pool = get_db_pool()
+        if not db_pool:
+            raise RuntimeError("Database pool not initialized")
+        
+        # Resource table mapping
+        resource_tables = {
+            "cases": "cases",
+            "client_communications": "client_communications", 
+            "documents": "documents",
+            "document_analysis": "document_analysis",
+            "error_logs": "error_logs",
+            "agent_context": "agent_context",
+            "agent_conversations": "agent_conversations",
+            "agent_messages": "agent_messages",
+            "agent_summaries": "agent_summaries"
+        }
+        
+        table_name = resource_tables[self.resource_name]
+        
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                query = f"DELETE FROM {table_name} WHERE {pk_field} = $1"
+                
+                logger.info(f"Executing DELETE: {query}")
+                logger.info(f"Parameters: [{record_id}]")
+                
+                try:
+                    result = await conn.execute(query, record_id)
+                    
+                    # Parse the result to get number of deleted rows
+                    # asyncpg returns "DELETE N" where N is the number of rows
+                    deleted_count = int(result.split()[-1]) if result else 0
+                    
+                    if deleted_count == 0:
+                        raise RuntimeError(f"No record found with ID: {record_id}")
+                    
+                    return {
+                        "count": deleted_count
+                    }
+                    
+                except asyncpg.ForeignKeyViolationError as e:
+                    logger.warning(f"Foreign key constraint violation: {e}")
+                    raise RuntimeError("CONFLICT: Cannot delete record due to foreign key constraints")
+                except asyncpg.PostgresError as e:
+                    logger.error(f"Database error during DELETE: {e}")
+                    raise RuntimeError(f"Database DELETE failed: {str(e)}")
+    
     def _build_read_query(self, operation: ReadOperation) -> tuple[str, List[Any]]:
         """Build SQL query from READ operation DSL"""
         
@@ -439,7 +535,7 @@ class BaseService:
             "cases": "cases",
             "client_communications": "client_communications", 
             "documents": "documents",
-            "document_analysis": "document_analysis_aggregated",
+            "document_analysis": "document_analysis",
             "error_logs": "error_logs",
             "agent_context": "agent_context",
             "agent_conversations": "agent_conversations",
@@ -496,7 +592,7 @@ class BaseService:
             "cases": "cases",
             "client_communications": "client_communications", 
             "documents": "documents",
-            "document_analysis": "document_analysis_aggregated",
+            "document_analysis": "document_analysis",
             "error_logs": "error_logs",
             "agent_context": "agent_context",
             "agent_conversations": "agent_conversations",
@@ -538,7 +634,7 @@ class BaseService:
             "cases": "cases",
             "client_communications": "client_communications", 
             "documents": "documents",
-            "document_analysis": "document_analysis_aggregated",
+            "document_analysis": "document_analysis",
             "error_logs": "error_logs",
             "agent_context": "agent_context",
             "agent_conversations": "agent_conversations",

@@ -120,8 +120,8 @@ def get_agent_messages_contract(role: str = "default") -> ResourceContract:
     # Fields allowed for ordering
     order_allowed = ["created_at", "sequence_number", "total_tokens"]
     
-    # Operations allowed (READ, INSERT, UPDATE - no DELETE per MVP spec)
-    ops_allowed = [Operation.READ, Operation.INSERT, Operation.UPDATE]
+    # Operations allowed (READ, INSERT, UPDATE, DELETE)
+    ops_allowed = [Operation.READ, Operation.INSERT, Operation.UPDATE, Operation.DELETE]
     
     # Allowed JOINs for agent_messages resource
     joins_allowed = [

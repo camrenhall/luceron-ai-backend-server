@@ -92,7 +92,8 @@ def _filter_contract_operations(contract: ResourceContract, allowed_operations: 
     operation_mapping = {
         "READ": Operation.READ,
         "INSERT": Operation.INSERT, 
-        "UPDATE": Operation.UPDATE
+        "UPDATE": Operation.UPDATE,
+        "DELETE": Operation.DELETE
     }
     
     allowed_ops = [

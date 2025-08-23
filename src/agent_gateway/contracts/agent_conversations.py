@@ -78,8 +78,8 @@ def get_agent_conversations_contract(role: str = "default") -> ResourceContract:
     # Fields allowed for ordering
     order_allowed = ["created_at", "updated_at", "total_tokens_used", "agent_type"]
     
-    # Operations allowed (READ, INSERT, UPDATE - no DELETE per MVP spec)
-    ops_allowed = [Operation.READ, Operation.INSERT, Operation.UPDATE]
+    # Operations allowed (READ, INSERT, UPDATE, DELETE)
+    ops_allowed = [Operation.READ, Operation.INSERT, Operation.UPDATE, Operation.DELETE]
     
     return ResourceContract(
         version="1.0.0",

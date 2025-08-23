@@ -39,14 +39,19 @@ class DatabaseValidator:
                 self.config.database_url,
                 min_size=2,
                 max_size=5,
-                command_timeout=10
+                command_timeout=30,
+                statement_cache_size=0  # Required for pgbouncer compatibility
             )
     
     async def disconnect(self):
         """Close database connections"""
         if self.pool:
-            await self.pool.close()
-            self.pool = None
+            try:
+                await asyncio.wait_for(self.pool.close(), timeout=30.0)
+            except asyncio.TimeoutError:
+                print("Warning: Database pool close timed out, forcing close")
+            finally:
+                self.pool = None
     
     async def record_exists(self, table: str, uuid_field: str, uuid_value: str) -> bool:
         """Check if record exists in database"""

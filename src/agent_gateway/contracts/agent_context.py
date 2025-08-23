@@ -95,8 +95,8 @@ def get_agent_context_contract(role: str = "default") -> ResourceContract:
     # Fields allowed for ordering
     order_allowed = ["created_at", "updated_at", "context_key", "expires_at"]
     
-    # Operations allowed (READ, INSERT, UPDATE - no DELETE per MVP spec)
-    ops_allowed = [Operation.READ, Operation.INSERT, Operation.UPDATE]
+    # Operations allowed (READ, INSERT, UPDATE, DELETE)
+    ops_allowed = [Operation.READ, Operation.INSERT, Operation.UPDATE, Operation.DELETE]
     
     # Allowed JOINs for agent_context resource
     joins_allowed = [

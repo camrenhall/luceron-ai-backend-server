@@ -36,6 +36,7 @@ class Operation(str, Enum):
     READ = "READ"
     INSERT = "INSERT"
     UPDATE = "UPDATE"
+    DELETE = "DELETE"
 
 class ContractField(BaseModel):
     """Field definition within a resource contract"""

@@ -190,18 +190,14 @@ async def delete_case(
         case_data = case_result.data[0]
         client_name = case_data['client_name']
         
-        # Attempt cascade delete
-        result = await cases_service.delete_case_cascade(case_id)
+        # Attempt delete
+        result = await cases_service.delete_case(case_id)
         
         if not result.success:
-            if result.error_type == "OPERATION_NOT_SUPPORTED":
-                # For now, return a message indicating this needs proper implementation
-                return {
-                    "message": "Case deletion requires proper CASCADE implementation",
-                    "case_id": case_id,
-                    "client_name": client_name,
-                    "note": "Use database CASCADE DELETE or implement cross-service coordination"
-                }
+            if result.error_type == "RESOURCE_NOT_FOUND":
+                raise HTTPException(status_code=404, detail="Case not found")
+            elif "foreign key" in result.error.lower() or "CONFLICT" in result.error:
+                raise HTTPException(status_code=409, detail="Cannot delete case: foreign key constraints exist. Delete related records first.")
             else:
                 raise HTTPException(status_code=500, detail=result.error)
         
@@ -415,7 +411,7 @@ async def list_cases(
             })
         
         # Get total count separately (since pagination affects count)
-        total_count_result = await cases_service.read(count_only=True)
+        total_count_result = await cases_service.read(limit=10000, offset=0)
         total_count = total_count_result.count if total_count_result.success else len(cases)
         
         return CaseSearchResponse(

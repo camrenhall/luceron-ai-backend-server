@@ -232,8 +232,8 @@ class CasesService(BaseService):
             # Order by created_at by default
             order_by = [{"field": "created_at", "dir": "desc"}]
             
-            # Get total count first
-            count_result = await self.read(filters=filters, count_only=True)
+            # Get total count first by running query without pagination
+            count_result = await self.read(filters=filters, limit=10000, offset=0)
             total_count = count_result.count if count_result.success else 0
             
             # Get filtered results  
@@ -341,17 +341,11 @@ class CasesService(BaseService):
         Returns:
             ServiceResult indicating success/failure
         """
-        logger.warning(f"Attempting to delete case {case_id}")
+        logger.info(f"Attempting to delete case {case_id}")
         
-        # Note: In a real implementation, you might want to do a soft delete
-        # or ensure all related data is handled properly
         try:
-            # For now, we'll return an error since deletion should be handled carefully
-            return ServiceResult(
-                success=False,
-                error="Case deletion not supported through service layer - use CASCADE operations",
-                error_type="OPERATION_NOT_SUPPORTED"
-            )
+            # Use the base service delete method
+            return await self.delete(case_id)
         except Exception as e:
             logger.error(f"Delete case failed for {case_id}: {e}")
             return ServiceResult(
