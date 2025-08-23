@@ -36,7 +36,7 @@ class DatabaseValidator:
         """Initialize database connection pool"""
         if self.pool is None:
             self.pool = await asyncpg.create_pool(
-                self.config.database_url,
+                self.config.qa_database_url,
                 min_size=2,
                 max_size=5,
                 command_timeout=30,

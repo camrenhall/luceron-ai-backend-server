@@ -475,7 +475,6 @@ def main():
     
     if args.qa_database_url:
         os.environ["QA_DATABASE_URL"] = args.qa_database_url
-        os.environ["QA_DATABASE_STRING"] = args.qa_database_url
     
     # Build configuration
     config = RunnerConfig(

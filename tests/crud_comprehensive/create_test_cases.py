@@ -9,9 +9,10 @@ import asyncpg
 import sys
 import logging
 
-# Set environment variables FIRST
-DATABASE_URL = 'postgresql://postgres.bjooglksafuxdeknpaso:SgUHEBQv5vdWG0pF@aws-0-us-east-2.pooler.supabase.com:6543/postgres'
-os.environ.setdefault("DATABASE_URL", DATABASE_URL)
+# QA Database URL must be provided
+QA_DATABASE_URL = os.getenv('QA_DATABASE_URL')
+if not QA_DATABASE_URL:
+    raise ValueError("QA_DATABASE_URL environment variable is required")
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +31,7 @@ async def create_test_cases():
     ]
     
     try:
-        conn = await asyncpg.connect(DATABASE_URL, statement_cache_size=0)
+        conn = await asyncpg.connect(QA_DATABASE_URL, statement_cache_size=0)
         logger.info("✅ Database connection established")
         
         created_count = 0
