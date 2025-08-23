@@ -88,7 +88,7 @@ jobs:
         docker rm test-api test-database || true
     
     - name: Upload smoke test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: smoke-test-results
@@ -169,7 +169,7 @@ jobs:
         docker rm test-api test-database || true
     
     - name: Upload regression test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: regression-test-results
@@ -251,7 +251,7 @@ jobs:
         docker rm test-api test-database || true
     
     - name: Upload parallel test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: parallel-test-results
