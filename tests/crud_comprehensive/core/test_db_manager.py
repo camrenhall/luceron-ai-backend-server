@@ -49,22 +49,41 @@ class TestDatabaseManager:
         print("   📋 Extracting production schema...")
         schema = await self.schema_extractor.extract_full_schema()
         
-        # Step 2: Create test database instance
-        if self.engine == "docker":
-            test_db = await self._create_docker_database()
-        elif self.engine == "embedded":
-            test_db = await self._create_embedded_database()
+        # Step 2: Check if we're in CI and should use existing GitHub Actions test DB
+        import os
+        if os.getenv('CI') and os.getenv('TEST_API_BASE_URL') == 'http://localhost:8080':
+            print("   🎯 CI detected - using GitHub Actions test database")
+            print("   📍 Connecting to existing test database at localhost:5433")
+            test_db = TestDatabase(
+                connection_url="postgresql://test_user:test_pass@localhost:5433/test_luceron_db",
+                container_id=None,
+                database_name="test_luceron_db", 
+                port=5433,
+                cleanup_required=False  # Don't clean up GitHub Actions DB
+            )
+            
+            # Wait for database to be ready
+            await self._wait_for_database_ready(test_db)
+            
+            # Replicate production schema into GitHub Actions test database
+            await self._replicate_schema(test_db, schema)
         else:
-            raise ValueError(f"Unsupported database engine: {self.engine}")
-        
-        # Step 3: Wait for database to be ready
-        await self._wait_for_database_ready(test_db)
-        
-        # Step 4: Replicate production schema
-        await self._replicate_schema(test_db, schema)
-        
-        # Track for cleanup
-        self.active_databases.append(test_db)
+            # Step 2: Create test database instance (local development)
+            if self.engine == "docker":
+                test_db = await self._create_docker_database()
+            elif self.engine == "embedded":
+                test_db = await self._create_embedded_database()
+            else:
+                raise ValueError(f"Unsupported database engine: {self.engine}")
+            
+            # Step 3: Wait for database to be ready
+            await self._wait_for_database_ready(test_db)
+            
+            # Step 4: Replicate production schema
+            await self._replicate_schema(test_db, schema)
+            
+            # Track for cleanup
+            self.active_databases.append(test_db)
         
         print(f"   ✅ Test database ready: {test_db.database_name}")
         print(f"   🔗 Connection: localhost:{test_db.port}")

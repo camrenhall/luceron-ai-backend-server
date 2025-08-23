@@ -111,7 +111,9 @@ class CRUDTestOrchestrator:
     
     async def execute_create(self, resource: str, endpoint: str, data: Dict[str, Any]) -> TestResult:
         """Execute CREATE operation"""
-        print(f"🔍 DEBUG CREATE: {resource} -> POST {endpoint}")
+        print(f"\n🔍 DEBUG CREATE Operation")
+        print(f"   Resource: {resource}")
+        print(f"   Endpoint: POST {endpoint}")
         print(f"   Data: {data}")
         
         response, duration = await self.time_operation(
@@ -119,8 +121,16 @@ class CRUDTestOrchestrator:
             self.rest_client.request("POST", endpoint, data)
         )
         
-        print(f"   Response: {response}")
-        print(f"   Duration: {duration}s")
+        print(f"   ⏱️  Duration: {duration:.3f}s")
+        print(f"   📡 Response Status: {response.get('_status_code', 'Unknown')}")
+        
+        if response.get('_success', False):
+            print(f"   ✅ Success: {response.get('message', 'Created successfully')}")
+        else:
+            print(f"   ❌ Error: {response.get('message', 'Unknown error')}")
+            if 'trace_id' in response:
+                print(f"      Trace ID: {response['trace_id']}")
+        print()
         
         success = response.get("_success", False)
         errors = []
