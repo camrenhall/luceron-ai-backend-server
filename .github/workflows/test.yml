@@ -30,9 +30,9 @@ jobs:
     
     - name: Build and start test environment
       run: |
-        cd tests/crud_comprehensive
         # Build the main application
         docker build -t luceron-api:test .
+        cd tests/crud_comprehensive
         
         # Start test database
         docker run -d \
@@ -111,9 +111,9 @@ jobs:
     
     - name: Build and start test environment
       run: |
-        cd tests/crud_comprehensive
         # Build the main application
         docker build -t luceron-api:test .
+        cd tests/crud_comprehensive
         
         # Start test database
         docker run -d \
@@ -193,9 +193,9 @@ jobs:
     
     - name: Build and start test environment
       run: |
-        cd tests/crud_comprehensive
         # Build the main application
         docker build -t luceron-api:test .
+        cd tests/crud_comprehensive
         
         # Start test database
         docker run -d \
