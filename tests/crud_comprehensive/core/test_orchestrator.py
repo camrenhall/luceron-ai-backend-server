@@ -1,7 +1,7 @@
 """
-Lightweight Test Orchestrator
-Central coordination for CRUD testing with dual-layer validation
-Ultra-focused MVP implementation
+Lightweight API Contract Test Orchestrator
+Central coordination for API-only CRUD testing
+Enterprise-grade contract validation without database dependencies
 """
 
 import asyncio
@@ -14,9 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.rest_client import RestClient
-from core.database_validator import DatabaseValidator, ValidationResult
 from core.data_factory import DataFactory
-from core.performance_tracker import PerformanceTracker
 from config import get_config
 
 
@@ -40,33 +38,25 @@ class CRUDCycleResult:
     read_result: TestResult
     update_result: TestResult
     delete_result: TestResult
-    validation_results: List[ValidationResult]
     total_duration: float
 
 
-class CRUDTestOrchestrator:
-    """Lightweight central coordinator for CRUD testing"""
+class APITestOrchestrator:
+    """Lightweight API contract testing coordinator"""
     
     def __init__(self):
         self.config = get_config()
         self.rest_client = RestClient()
-        self.db_validator = DatabaseValidator()
         self.data_factory = DataFactory()
-        self.performance_tracker = PerformanceTracker()
         self.results: List[TestResult] = []
         
     async def setup(self):
         """Initialize components"""
-        await self.db_validator.connect()
+        pass  # No setup needed for API-only testing
         
     async def teardown(self):
         """Cleanup components"""
-        await self.db_validator.disconnect()
-        
-        # Cleanup test data if enabled
-        if self.config.cleanup_test_data:
-            cleanup_count = await self.db_validator.cleanup_test_data(self.config.test_data_prefix)
-            print(f"🧹 Cleaned up {cleanup_count} test records")
+        pass  # No cleanup needed - API handles data lifecycle
     
     async def time_operation(self, operation_name: str, coro) -> Tuple[Any, float]:
         """Time an operation and return result + duration"""
@@ -74,265 +64,6 @@ class CRUDTestOrchestrator:
         result = await coro
         duration = time.time() - start_time
         return result, duration
-    
-    async def validate_database_state(self, table: str, uuid_field: str, uuid_value: str, operation: str) -> ValidationResult:
-        """Validate database state after operation"""
-        if not self.config.enable_database_validation:
-            return ValidationResult(True, [], [])
-        
-        # Give time for API transactions to commit before validation
-        import asyncio
-        await asyncio.sleep(0.5)  # 500ms delay everywhere to ensure API transaction commits
-            
-        validation = ValidationResult(True, [], [])
-        
-        try:
-            if operation == "DELETE":
-                # Record should not exist
-                exists = await self.db_validator.record_exists(table, uuid_field, uuid_value)
-                if exists:
-                    validation.errors.append(f"Record still exists after DELETE")
-                    validation.valid = False
-            else:
-                # Record should exist
-                exists = await self.db_validator.record_exists(table, uuid_field, uuid_value)
-                if not exists:
-                    validation.errors.append(f"Record not found after {operation}")
-                    validation.valid = False
-                else:
-                    # Validate foreign keys
-                    fk_validation = await self.db_validator.validate_foreign_keys(table, uuid_field, uuid_value)
-                    if not fk_validation.valid:
-                        validation.errors.extend(fk_validation.errors)
-                        validation.valid = False
-                    validation.warnings.extend(fk_validation.warnings)
-                        
-        except Exception as e:
-            validation.errors.append(f"Database validation error: {str(e)}")
-            validation.valid = False
-            
-        return validation
-    
-    async def execute_create(self, resource: str, endpoint: str, data: Dict[str, Any]) -> TestResult:
-        """Execute CREATE operation"""
-        print(f"\n🔍 DEBUG CREATE Operation")
-        print(f"   Resource: {resource}")
-        print(f"   Endpoint: POST {endpoint}")
-        print(f"   Data: {data}")
-        
-        response, duration = await self.time_operation(
-            f"CREATE {resource}",
-            self.rest_client.request("POST", endpoint, data)
-        )
-        
-        print(f"   ⏱️  Duration: {duration:.3f}s")
-        print(f"   📡 Response Status: {response.get('_status_code', 'Unknown')}")
-        
-        if response.get('_success', False):
-            print(f"   ✅ Success: {response.get('message', 'Created successfully')}")
-        else:
-            print(f"   ❌ Error: {response.get('message', 'Unknown error')}")
-            if 'trace_id' in response:
-                print(f"      Trace ID: {response['trace_id']}")
-        print()
-        
-        success = response.get("_success", False)
-        errors = []
-        warnings = []
-        uuid_value = None
-        
-        if not success:
-            # Enhanced error reporting - show full response for debugging
-            status_code = response.get('_status_code', 'Unknown')
-            error_detail = response.get('detail', response.get('message', 'No error message'))
-            
-            # Show additional error context if available
-            error_parts = [f"HTTP {status_code}: {error_detail}"]
-            if 'error' in response and response['error'] != error_detail:
-                error_parts.append(f"Error: {response['error']}")
-            if 'traceback' in response:
-                error_parts.append(f"Traceback: {response['traceback'][:200]}...")
-            if 'raw_response' in response:
-                error_parts.append(f"Raw: {response['raw_response'][:200]}...")
-                
-            errors.append(" | ".join(error_parts))
-        else:
-            # Extract UUID from response
-            uuid_value = self._extract_uuid(response)
-            if not uuid_value:
-                warnings.append("Could not extract UUID from response")
-                
-        result = TestResult(
-            operation="CREATE",
-            resource=resource,
-            success=success,
-            duration=duration,
-            errors=errors,
-            warnings=warnings,
-            uuid=uuid_value
-        )
-        
-        # Track performance metrics
-        self.performance_tracker.record_test_result(
-            test_name=f"{resource}_crud_cycle",
-            operation="CREATE",
-            resource=resource,
-            duration=duration,
-            success=success
-        )
-        
-        self.results.append(result)
-        return result
-    
-    async def execute_read(self, resource: str, endpoint: str, uuid_value: str) -> TestResult:
-        """Execute READ operation"""
-        read_endpoint = endpoint.replace("{id}", uuid_value)
-        response, duration = await self.time_operation(
-            f"READ {resource}",
-            self.rest_client.request("GET", read_endpoint)
-        )
-        
-        success = response.get("_success", False)
-        errors = []
-        warnings = []
-        
-        if not success:
-            # Enhanced error reporting - show full response for debugging
-            status_code = response.get('_status_code', 'Unknown')
-            error_detail = response.get('detail', response.get('message', 'No error message'))
-            
-            # Show additional error context if available
-            error_parts = [f"HTTP {status_code}: {error_detail}"]
-            if 'error' in response and response['error'] != error_detail:
-                error_parts.append(f"Error: {response['error']}")
-            if 'traceback' in response:
-                error_parts.append(f"Traceback: {response['traceback'][:200]}...")
-            if 'raw_response' in response:
-                error_parts.append(f"Raw: {response['raw_response'][:200]}...")
-                
-            errors.append(" | ".join(error_parts))
-            
-        result = TestResult(
-            operation="READ",
-            resource=resource,
-            success=success,
-            duration=duration,
-            errors=errors,
-            warnings=warnings,
-            uuid=uuid_value
-        )
-        
-        # Track performance metrics
-        self.performance_tracker.record_test_result(
-            test_name=f"{resource}_crud_cycle",
-            operation="READ",
-            resource=resource,
-            duration=duration,
-            success=success
-        )
-        
-        self.results.append(result)
-        return result
-    
-    async def execute_update(self, resource: str, endpoint: str, uuid_value: str, data: Dict[str, Any]) -> TestResult:
-        """Execute UPDATE operation"""
-        update_endpoint = endpoint.replace("{id}", uuid_value)
-        response, duration = await self.time_operation(
-            f"UPDATE {resource}",
-            self.rest_client.request("PUT", update_endpoint, data)
-        )
-        
-        success = response.get("_success", False)
-        errors = []
-        warnings = []
-        
-        if not success:
-            # Enhanced error reporting - show full response for debugging
-            status_code = response.get('_status_code', 'Unknown')
-            error_detail = response.get('detail', response.get('message', 'No error message'))
-            
-            # Show additional error context if available
-            error_parts = [f"HTTP {status_code}: {error_detail}"]
-            if 'error' in response and response['error'] != error_detail:
-                error_parts.append(f"Error: {response['error']}")
-            if 'traceback' in response:
-                error_parts.append(f"Traceback: {response['traceback'][:200]}...")
-            if 'raw_response' in response:
-                error_parts.append(f"Raw: {response['raw_response'][:200]}...")
-                
-            errors.append(" | ".join(error_parts))
-            
-        result = TestResult(
-            operation="UPDATE",
-            resource=resource,
-            success=success,
-            duration=duration,
-            errors=errors,
-            warnings=warnings,
-            uuid=uuid_value
-        )
-        
-        # Track performance metrics
-        self.performance_tracker.record_test_result(
-            test_name=f"{resource}_crud_cycle",
-            operation="UPDATE",
-            resource=resource,
-            duration=duration,
-            success=success
-        )
-        
-        self.results.append(result)
-        return result
-    
-    async def execute_delete(self, resource: str, endpoint: str, uuid_value: str) -> TestResult:
-        """Execute DELETE operation"""
-        delete_endpoint = endpoint.replace("{id}", uuid_value)
-        response, duration = await self.time_operation(
-            f"DELETE {resource}",
-            self.rest_client.request("DELETE", delete_endpoint)
-        )
-        
-        success = response.get("_success", False)
-        errors = []
-        warnings = []
-        
-        if not success:
-            # Enhanced error reporting - show full response for debugging
-            status_code = response.get('_status_code', 'Unknown')
-            error_detail = response.get('detail', response.get('message', 'No error message'))
-            
-            # Show additional error context if available
-            error_parts = [f"HTTP {status_code}: {error_detail}"]
-            if 'error' in response and response['error'] != error_detail:
-                error_parts.append(f"Error: {response['error']}")
-            if 'traceback' in response:
-                error_parts.append(f"Traceback: {response['traceback'][:200]}...")
-            if 'raw_response' in response:
-                error_parts.append(f"Raw: {response['raw_response'][:200]}...")
-                
-            errors.append(" | ".join(error_parts))
-            
-        result = TestResult(
-            operation="DELETE",
-            resource=resource,
-            success=success,
-            duration=duration,
-            errors=errors,
-            warnings=warnings,
-            uuid=uuid_value
-        )
-        
-        # Track performance metrics
-        self.performance_tracker.record_test_result(
-            test_name=f"{resource}_crud_cycle",
-            operation="DELETE",
-            resource=resource,
-            duration=duration,
-            success=success
-        )
-        
-        self.results.append(result)
-        return result
     
     def _extract_uuid(self, response: Dict[str, Any]) -> Optional[str]:
         """Extract UUID from API response - handles various response formats"""
@@ -352,6 +83,257 @@ class CRUDTestOrchestrator:
                     return str(response['data'][field])
                     
         return None
+    
+    def _validate_create_data(self, create_data: Dict[str, Any], read_response: Dict[str, Any]):
+        """Validate that created data matches what was sent"""
+        response_data = read_response.get('data', read_response)
+        
+        for key, expected_value in create_data.items():
+            if key in response_data:
+                actual_value = response_data[key]
+                if str(actual_value) != str(expected_value):
+                    raise AssertionError(f"CREATE validation failed: {key} = {actual_value}, expected {expected_value}")
+    
+    def _validate_update_data(self, update_data: Dict[str, Any], read_response: Dict[str, Any]):
+        """Validate that updated data matches what was sent"""
+        response_data = read_response.get('data', read_response)
+        
+        for key, expected_value in update_data.items():
+            if key in response_data:
+                actual_value = response_data[key]
+                if str(actual_value) != str(expected_value):
+                    raise AssertionError(f"UPDATE validation failed: {key} = {actual_value}, expected {expected_value}")
+    
+    async def execute_crud_cycle(self, resource: str, endpoints: Dict[str, str]) -> CRUDCycleResult:
+        """Execute complete CRUD cycle with API contract validation"""
+        print(f"\n🔄 Starting CRUD cycle for {resource}")
+        
+        # Generate test data
+        if resource == "documents":
+            # Documents need a case_id, so create a case first
+            case_data, _ = self.data_factory.generate_case()
+            case_response = await self.rest_client.request("POST", "/api/cases", case_data)
+            if not case_response.get("_success", False):
+                raise RuntimeError(f"Failed to create parent case for document test: {case_response}")
+            case_id = self._extract_uuid(case_response)
+            create_data, expected_id = self.data_factory.generate_document(case_id)
+        elif resource == "communications":
+            # Communications need a case_id
+            case_data, _ = self.data_factory.generate_case()
+            case_response = await self.rest_client.request("POST", "/api/cases", case_data)
+            if not case_response.get("_success", False):
+                raise RuntimeError(f"Failed to create parent case for communication test: {case_response}")
+            case_id = self._extract_uuid(case_response)
+            create_data, expected_id = self.data_factory.generate_communication(case_id)
+        else:
+            # Direct resource generation
+            factory_method = getattr(self.data_factory, f"generate_{resource.rstrip('s')}")
+            create_data, expected_id = factory_method()
+        
+        cycle_start = time.time()
+        
+        # === CREATE ===
+        print(f"   📝 CREATE {resource}")
+        create_response, create_duration = await self.time_operation(
+            f"CREATE {resource}",
+            self.rest_client.request("POST", endpoints["create"], create_data)
+        )
+        
+        if not create_response.get("_success", False):
+            raise AssertionError(f"CREATE failed: {create_response}")
+        
+        resource_id = self._extract_uuid(create_response)
+        if not resource_id:
+            raise AssertionError("No UUID returned from CREATE operation")
+        
+        create_result = TestResult("CREATE", resource, True, create_duration, [], [], resource_id)
+        print(f"      ✅ Created {resource_id} in {create_duration:.3f}s")
+        
+        # === READ (validates CREATE worked) ===
+        print(f"   📖 READ {resource}")
+        read_response, read_duration = await self.time_operation(
+            f"READ {resource}",
+            self.rest_client.request("GET", endpoints["read"].format(id=resource_id))
+        )
+        
+        if not read_response.get("_success", False):
+            raise AssertionError(f"READ failed after CREATE: {read_response}")
+        
+        # Validate CREATE data integrity via API response
+        self._validate_create_data(create_data, read_response)
+        
+        read_result = TestResult("READ", resource, True, read_duration, [], [], resource_id)
+        print(f"      ✅ Read validated in {read_duration:.3f}s")
+        
+        # === UPDATE ===
+        print(f"   ✏️  UPDATE {resource}")
+        update_data = self._generate_update_data(resource)
+        update_response, update_duration = await self.time_operation(
+            f"UPDATE {resource}",
+            self.rest_client.request("PUT", endpoints["update"].format(id=resource_id), update_data)
+        )
+        
+        if not update_response.get("_success", False):
+            raise AssertionError(f"UPDATE failed: {update_response}")
+        
+        update_result = TestResult("UPDATE", resource, True, update_duration, [], [], resource_id)
+        print(f"      ✅ Updated in {update_duration:.3f}s")
+        
+        # === READ (validates UPDATE worked) ===
+        print(f"   📖 READ after UPDATE")
+        updated_read_response, updated_read_duration = await self.time_operation(
+            f"READ after UPDATE {resource}",
+            self.rest_client.request("GET", endpoints["read"].format(id=resource_id))
+        )
+        
+        if not updated_read_response.get("_success", False):
+            raise AssertionError(f"READ failed after UPDATE: {updated_read_response}")
+        
+        # Validate UPDATE data integrity via API response
+        self._validate_update_data(update_data, updated_read_response)
+        print(f"      ✅ Update validated in {updated_read_duration:.3f}s")
+        
+        # === DELETE ===
+        print(f"   🗑️  DELETE {resource}")
+        delete_response, delete_duration = await self.time_operation(
+            f"DELETE {resource}",
+            self.rest_client.request("DELETE", endpoints["delete"].format(id=resource_id))
+        )
+        
+        if not delete_response.get("_success", False):
+            raise AssertionError(f"DELETE failed: {delete_response}")
+        
+        delete_result = TestResult("DELETE", resource, True, delete_duration, [], [], resource_id)
+        print(f"      ✅ Deleted in {delete_duration:.3f}s")
+        
+        # === READ (validates DELETE worked) ===
+        print(f"   📖 READ after DELETE (should be 404)")
+        final_read_response, final_read_duration = await self.time_operation(
+            f"READ after DELETE {resource}",
+            self.rest_client.request("GET", endpoints["read"].format(id=resource_id))
+        )
+        
+        # DELETE validation - should return 404
+        if final_read_response.get("_status_code") != 404:
+            raise AssertionError(f"DELETE validation failed - resource still exists: {final_read_response}")
+        
+        print(f"      ✅ Delete validated (404) in {final_read_duration:.3f}s")
+        
+        total_duration = time.time() - cycle_start
+        print(f"   🎯 CRUD cycle completed in {total_duration:.3f}s")
+        
+        return CRUDCycleResult(
+            resource=resource,
+            create_result=create_result,
+            read_result=read_result,
+            update_result=update_result,
+            delete_result=delete_result,
+            total_duration=total_duration
+        )
+    
+    def _generate_update_data(self, resource: str) -> Dict[str, Any]:
+        """Generate update data for different resource types"""
+        if resource == "cases":
+            return {"status": "CLOSED"}
+        elif resource == "documents":
+            return {"status": "PROCESSING"}
+        elif resource == "communications":
+            return {"direction": "outgoing"}
+        elif resource == "agent_conversations":
+            return {"status": "completed"}
+        elif resource == "error_logs":
+            return {"status": "resolved"}
+        else:
+            return {"status": "updated"}
+    
+    # Legacy methods for backward compatibility with existing tests
+    async def execute_create(self, resource: str, endpoint: str, data: Dict[str, Any]) -> TestResult:
+        """Execute CREATE operation - legacy compatibility"""
+        response, duration = await self.time_operation(
+            f"CREATE {resource}",
+            self.rest_client.request("POST", endpoint, data)
+        )
+        
+        success = response.get("_success", False)
+        errors = []
+        warnings = []
+        uuid_value = None
+        
+        if not success:
+            status_code = response.get('_status_code', 'Unknown')
+            error_detail = response.get('detail', response.get('message', 'No error message'))
+            errors.append(f"HTTP {status_code}: {error_detail}")
+        else:
+            uuid_value = self._extract_uuid(response)
+            if not uuid_value:
+                warnings.append("Could not extract UUID from response")
+        
+        result = TestResult("CREATE", resource, success, duration, errors, warnings, uuid_value)
+        self.results.append(result)
+        return result
+    
+    async def execute_read(self, resource: str, endpoint: str, uuid_value: str) -> TestResult:
+        """Execute READ operation - legacy compatibility"""
+        read_endpoint = endpoint.replace("{id}", uuid_value)
+        response, duration = await self.time_operation(
+            f"READ {resource}",
+            self.rest_client.request("GET", read_endpoint)
+        )
+        
+        success = response.get("_success", False)
+        errors = []
+        warnings = []
+        
+        if not success:
+            status_code = response.get('_status_code', 'Unknown')
+            error_detail = response.get('detail', response.get('message', 'No error message'))
+            errors.append(f"HTTP {status_code}: {error_detail}")
+        
+        result = TestResult("READ", resource, success, duration, errors, warnings, uuid_value)
+        self.results.append(result)
+        return result
+    
+    async def execute_update(self, resource: str, endpoint: str, uuid_value: str, data: Dict[str, Any]) -> TestResult:
+        """Execute UPDATE operation - legacy compatibility"""
+        update_endpoint = endpoint.replace("{id}", uuid_value)
+        response, duration = await self.time_operation(
+            f"UPDATE {resource}",
+            self.rest_client.request("PUT", update_endpoint, data)
+        )
+        
+        success = response.get("_success", False)
+        errors = []
+        warnings = []
+        
+        if not success:
+            status_code = response.get('_status_code', 'Unknown')
+            error_detail = response.get('detail', response.get('message', 'No error message'))
+            errors.append(f"HTTP {status_code}: {error_detail}")
+        
+        result = TestResult("UPDATE", resource, success, duration, errors, warnings, uuid_value)
+        self.results.append(result)
+        return result
+    
+    async def execute_delete(self, resource: str, endpoint: str, uuid_value: str) -> TestResult:
+        """Execute DELETE operation - legacy compatibility"""
+        delete_endpoint = endpoint.replace("{id}", uuid_value)
+        response, duration = await self.time_operation(
+            f"DELETE {resource}",
+            self.rest_client.request("DELETE", delete_endpoint)
+        )
+        
+        success = response.get("_success", False)
+        errors = []
+        warnings = []
+        
+        if not success:
+            status_code = response.get('_status_code', 'Unknown')
+            error_detail = response.get('detail', response.get('message', 'No error message'))
+            errors.append(f"HTTP {status_code}: {error_detail}")
+        
+        result = TestResult("DELETE", resource, success, duration, errors, warnings, uuid_value)
+        self.results.append(result)
+        return result
     
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get performance summary"""
@@ -386,9 +368,7 @@ class CRUDTestOrchestrator:
             "failed": total - successful,
             "success_rate": successful / total if total > 0 else 0
         }
-    
-    async def cleanup_test_data(self):
-        """Cleanup test data method for compatibility with conftest"""
-        if self.config.cleanup_test_data:
-            cleanup_count = await self.db_validator.cleanup_test_data(self.config.test_data_prefix)
-            print(f"🧹 Cleaned up {cleanup_count} test records")
+
+
+# Backward compatibility alias
+CRUDTestOrchestrator = APITestOrchestrator

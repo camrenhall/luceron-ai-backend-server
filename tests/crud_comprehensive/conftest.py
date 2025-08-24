@@ -1,11 +1,10 @@
 """
-Pytest configuration and fixtures for CRUD comprehensive testing
-Optimized for CI/CD performance and parallel execution
+Pytest configuration and fixtures for API contract testing
+Lightweight configuration without database dependencies
 """
 
 import pytest
 import asyncio
-import asyncpg
 from typing import AsyncGenerator
 import os
 import uuid
@@ -15,7 +14,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.test_orchestrator import CRUDTestOrchestrator
+from core.test_orchestrator import APITestOrchestrator
 from core.rest_client import RestClient
 
 # === CRUD DATABASE TESTING SETUP ===
@@ -48,32 +47,22 @@ async def shared_rest_client() -> AsyncGenerator[RestClient, None]:
 
 
 @pytest.fixture(scope="function")
-async def clean_orchestrator(shared_rest_client) -> AsyncGenerator[CRUDTestOrchestrator, None]:
-    """Optimized test orchestrator for QA database"""
-    from config import get_config
-    config = get_config()
-    
-    orch = CRUDTestOrchestrator()
+async def clean_orchestrator(shared_rest_client) -> AsyncGenerator[APITestOrchestrator, None]:
+    """Lightweight API test orchestrator"""
+    orch = APITestOrchestrator()
     orch.rest_client = shared_rest_client  # Reuse authenticated client
     
-    print(f"   🔗 Using QA database")
+    print(f"   🔗 API-only testing")
     
     await orch.setup()
     yield orch
-    
-    # Clean up test data from QA database
-    try:
-        await orch.cleanup_test_data()
-    except Exception as e:
-        print(f"Warning: Cleanup failed: {e}")
-    
     await orch.teardown()
 
 
 @pytest.fixture(scope="session")
-async def orchestrator() -> AsyncGenerator[CRUDTestOrchestrator, None]:
+async def orchestrator() -> AsyncGenerator[APITestOrchestrator, None]:
     """Legacy session-scoped test orchestrator for compatibility"""
-    orch = CRUDTestOrchestrator()
+    orch = APITestOrchestrator()
     await orch.setup()
     yield orch
     await orch.teardown()
