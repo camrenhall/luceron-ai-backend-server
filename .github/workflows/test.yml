@@ -89,7 +89,7 @@ jobs:
         
         # Test configuration
         DB_MODE: "qa"
-        OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
+        TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
         
@@ -173,7 +173,7 @@ jobs:
         
         # Test configuration
         DB_MODE: "qa"
-        OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
+        TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
         
@@ -247,7 +247,7 @@ jobs:
         
         # Test configuration
         DB_MODE: "qa"
-        OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
+        TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
         
