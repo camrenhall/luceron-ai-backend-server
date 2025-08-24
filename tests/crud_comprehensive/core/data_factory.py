@@ -53,7 +53,7 @@ class DataFactory:
             "original_file_name": f"test_doc_{self.fake.uuid4()}.pdf",
             "original_file_size": self.fake.random_int(min=1000, max=10000000),
             "original_file_type": "application/pdf",
-            "original_s3_location": f"s3://test-bucket/{self.config.test_data_prefix.lower()}/",
+            "original_s3_location": f"s3://test-bucket/{"API_TEST".lower()}/",
             "original_s3_key": f"test-docs/{self.fake.uuid4()}.pdf",
             "status": "PENDING"
         }
@@ -70,8 +70,8 @@ class DataFactory:
             "channel": "email",
             "direction": "outgoing",
             "status": "sent",
-            "sender": f"test.sender@{self.config.test_data_prefix.lower().replace('_', '-')}.example.com",
-            "recipient": f"test.recipient@{self.config.test_data_prefix.lower().replace('_', '-')}.example.com",
+            "sender": f"test.sender@{"API_TEST".lower().replace('_', '-')}.example.com",
+            "recipient": f"test.recipient@{"API_TEST".lower().replace('_', '-')}.example.com",
             "subject": f"Test Communication - {self.fake.sentence()}",
             "message_content": f"Test message content: {self.fake.paragraph()}"
         }
@@ -131,7 +131,7 @@ class DataFactory:
         self.track_uuid('error_logs', error_id)
         
         data = {
-            "component": f"{self.config.test_data_prefix}_test_component",
+            "component": f"{"API_TEST"}_test_component",
             "error_message": f"Test error: {self.fake.sentence()}",
             "severity": "medium",
             "context": {

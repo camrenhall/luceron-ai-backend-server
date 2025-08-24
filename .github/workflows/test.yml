@@ -79,19 +79,18 @@ jobs:
         echo "Final container logs:"
         docker logs test-api
     
-    - name: Run smoke tests (QA Database)
+    - name: Run smoke tests (API Only)
       env:
-        # QA Database for testing (same as container)
-        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
-        
         # Test API endpoint (containerized application)
         TEST_API_BASE_URL: "http://localhost:8080"
         
-        # Test configuration
-        DB_MODE: "qa"
+        # OAuth Configuration  
         TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
+        
+        # Concurrency Control
+        MAX_CONCURRENT_TESTS: "5"
         
       run: |
         cd tests/crud_comprehensive
@@ -163,19 +162,18 @@ jobs:
         # Wait for API to be ready
         timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
     
-    - name: Run regression tests (QA Database)
+    - name: Run regression tests (API Only)
       env:
-        # QA Database for testing (same as container)
-        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
-        
         # Test API endpoint (containerized application)
         TEST_API_BASE_URL: "http://localhost:8080"
         
-        # Test configuration
-        DB_MODE: "qa"
+        # OAuth Configuration
         TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
+        
+        # Concurrency Control
+        MAX_CONCURRENT_TESTS: "5"
         
       run: |
         cd tests/crud_comprehensive
@@ -237,19 +235,18 @@ jobs:
         # Wait for API to be ready
         timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
     
-    - name: Run parallel tests (QA Database)
+    - name: Run parallel tests (API Only)
       env:
-        # QA Database for testing (same as container)
-        QA_DATABASE_URL: ${{ secrets.QA_DATABASE_URL }}
-        
         # Test API endpoint (containerized application)
         TEST_API_BASE_URL: "http://localhost:8080"
         
-        # Test configuration
-        DB_MODE: "qa"
+        # OAuth Configuration
         TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
+        
+        # Concurrency Control
+        MAX_CONCURRENT_TESTS: "5"
         
       run: |
         cd tests/crud_comprehensive
