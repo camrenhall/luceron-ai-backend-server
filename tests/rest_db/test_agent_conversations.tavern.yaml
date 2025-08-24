@@ -37,13 +37,16 @@ stages:
       json:
         status: "ACTIVE"
         conversation_type: "GENERAL"
+        agent_type: "CommunicationsAgent"
     response:
-      status_code: 201
+      status_code: 200
       json:
         conversation_id: !anystr
         status: "ACTIVE"
-        conversation_type: "GENERAL"
+        agent_type: "CommunicationsAgent"
+        total_tokens_used: !anyint
         created_at: !anystr
+        updated_at: !anystr
       save:
         json:
           created_conversation_id: conversation_id
