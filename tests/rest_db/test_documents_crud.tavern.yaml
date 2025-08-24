@@ -66,14 +66,24 @@ stages:
         file_size: 2048
         content_hash: "rest_test_hash_123"
         is_analyzed: false
+        original_file_name: "REST_TestDocument.pdf"
+        original_file_size: 2048
+        original_file_type: "PDF"
+        original_s3_location: "test/documents/REST_TestDocument.pdf"
     response:
-      status_code: 201
+      status_code: 200
       json:
         document_id: !anystr
         case_id: "{parent_case_id}"
         file_name: "REST_TestDocument.pdf"
         file_type: "PDF"
+        file_size: 2048
+        content_hash: "rest_test_hash_123"
         is_analyzed: false
+        original_file_name: "REST_TestDocument.pdf"
+        original_file_size: 2048
+        original_file_type: "PDF"
+        original_s3_location: "test/documents/REST_TestDocument.pdf"
         created_at: !anystr
       save:
         json:
