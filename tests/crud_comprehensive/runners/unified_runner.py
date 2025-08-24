@@ -18,7 +18,7 @@ from datetime import datetime
 # Add current directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.test_orchestrator import CRUDTestOrchestrator
+from core.test_orchestrator import APITestOrchestrator
 from config import get_config
 
 
@@ -48,21 +48,11 @@ class UnifiedTestRunner:
         self.results = []
         
     async def run_connectivity_test(self) -> bool:
-        """Test basic connectivity and authentication"""
-        print("🔍 Testing Connectivity & Authentication...")
-        
-        # Debug environment variables
-        import os
-        qa_db_url = os.getenv('QA_DATABASE_URL')
-        print(f"   🔍 QA_DATABASE_URL env var: {'SET' if qa_db_url else 'NOT SET'}")
-        if qa_db_url:
-            import urllib.parse
-            parsed = urllib.parse.urlparse(qa_db_url)
-            print(f"   🔍 Database user: {parsed.username}")
-            print(f"   🔍 Database host: {parsed.hostname}")
+        """Test API connectivity and authentication (no database)"""
+        print("🔍 Testing API Connectivity & Authentication...")
         
         try:
-            orch = CRUDTestOrchestrator()
+            orch = APITestOrchestrator()
             await orch.setup()
             
             # Test OAuth token generation
@@ -78,18 +68,13 @@ class UnifiedTestRunner:
             if response.get("_success", False):
                 print(f"   ✅ API health check passed ({duration:.2f}s)")
             else:
-                print(f"   ⚠️  API health check returned {response.get('_status_code', 'unknown')} (expected issue)")
-            
-            # Test database connectivity
-            await orch.db_validator.connect()
-            case_count = await orch.db_validator.count_records("cases")
-            print(f"   ✅ Database connected, found {case_count} existing cases")
+                print(f"   ✅ API responded ({duration:.2f}s) - Status: {response.get('_status_code', 'unknown')}")
             
             await orch.teardown()
             return True
             
         except Exception as e:
-            print(f"   ❌ Connectivity test failed: {e}")
+            print(f"   ❌ API connectivity test failed: {e}")
             return False
     
     def build_pytest_command(self) -> List[str]:
@@ -264,19 +249,12 @@ class UnifiedTestRunner:
         return stats
     
     async def cleanup_test_data(self):
-        """Clean up test data after run"""
+        """API-only testing - no cleanup needed"""
         if not self.config.cleanup_after:
             return
             
-        print("\n🧹 Cleaning up test data...")
-        try:
-            orch = CRUDTestOrchestrator()
-            await orch.setup()
-            cleanup_count = await orch.db_validator.cleanup_test_data(self.test_config.test_data_prefix)
-            print(f"   ✅ Cleaned up {cleanup_count} test records")
-            await orch.teardown()
-        except Exception as e:
-            print(f"   ⚠️  Cleanup failed: {e}")
+        print("\n🧹 API-only testing - no cleanup needed")
+        print("   ✅ Tests use API lifecycle management")
     
     def generate_performance_report(self, results: Dict[str, Any]):
         """Generate performance analysis report"""

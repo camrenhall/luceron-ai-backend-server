@@ -35,7 +35,7 @@ class DataFactory:
         self.track_uuid('cases', case_id)
         
         data = {
-            "client_name": f"{self.config.test_data_prefix}_{self.fake.company()}",
+            "client_name": f"API_TEST_{self.fake.company()}",
             "client_email": f"test.{self.fake.user_name()}@crud-test.example.com",
             "client_phone": self.fake.phone_number()[:20],  # Respect DB constraint
             "status": "OPEN"
