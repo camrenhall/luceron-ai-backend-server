@@ -17,7 +17,7 @@ stages:
         grant_type: client_credentials
         client_id: "{oauth_service_id}"
         client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
-        client_assertion: !function "auth_helpers:generate_jwt_token"
+        client_assertion: "{jwt_token}"
     response:
       status_code: 200
       json:
@@ -117,7 +117,7 @@ stages:
         grant_type: client_credentials
         client_id: "{oauth_service_id}"
         client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
-        client_assertion: !function "auth_helpers:generate_jwt_token"
+        client_assertion: "{jwt_token}"
     response:
       status_code: 200
       json:

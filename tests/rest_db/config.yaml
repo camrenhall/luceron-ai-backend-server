@@ -1,15 +1,15 @@
 ---
 # Tavern Global Configuration for REST API Testing
 variables:
-  # API Configuration
-  api_base_url: "{env:AGENT_DB_BASE_URL:http://localhost:8080}"
+  # API Configuration - using default localhost for testing
+  api_base_url: "http://localhost:8080"
   
   # OAuth Configuration
-  oauth_service_id: "{env:OAUTH_SERVICE_ID:qa_comprehensive_test_service}"
-  oauth_audience: "{env:OAUTH_AUDIENCE:luceron-auth-server}"
+  oauth_service_id: "qa_comprehensive_test_service"
+  oauth_audience: "luceron-auth-server"
   
   # Test Data Configuration
-  test_data_prefix: "{env:TEST_DATA_PREFIX:REST_TEST}"
+  test_data_prefix: "REST_TEST"
 
 # Global request defaults
 request_defaults:

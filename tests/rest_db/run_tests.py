@@ -45,73 +45,106 @@ def get_test_files(pattern: Optional[str] = None) -> List[Path]:
     return sorted(test_files)
 
 
+def prepare_test_environment():
+    """Prepare environment variables for JWT token generation"""
+    import os
+    import auth_helpers
+    
+    # Generate JWT token if possible and inject as environment variable
+    try:
+        jwt_token = auth_helpers.generate_jwt_token()
+        os.environ['TAVERN_JWT_TOKEN'] = jwt_token
+        print("   🔑 JWT token generated and injected")
+    except Exception as e:
+        print(f"   ⚠️  JWT generation failed: {e}")
+        os.environ['TAVERN_JWT_TOKEN'] = 'test_placeholder_token'
+
+
+def create_temp_test_file(original_file: Path) -> Path:
+    """Create a temporary test file with environment variable substitutions"""
+    import os
+    
+    # Read original file
+    content = original_file.read_text()
+    
+    # Remove include dependency
+    content = content.replace('includes:\n  - !include config.yaml\n', '')
+    
+    # Replace template variables with actual values
+    replacements = {
+        '{api_base_url}': os.getenv('AGENT_DB_BASE_URL', 'http://localhost:8080'),
+        '{oauth_service_id}': os.getenv('OAUTH_SERVICE_ID', 'qa_comprehensive_test_service'),
+        '{oauth_audience}': os.getenv('OAUTH_AUDIENCE', 'luceron-auth-server'),
+        '{test_data_prefix}': os.getenv('TEST_DATA_PREFIX', 'REST_TEST'),
+        '{jwt_token}': os.getenv('TAVERN_JWT_TOKEN', 'test_placeholder_token')
+    }
+    
+    for placeholder, value in replacements.items():
+        content = content.replace(placeholder, value)
+    
+    # Create temp file in same directory
+    temp_file = original_file.parent / f"temp_{original_file.name}"
+    temp_file.write_text(content)
+    return temp_file
+
+
 def run_tavern_tests(test_files: List[Path], verbose: bool = False) -> bool:
-    """Run Tavern tests using tavern-ci command"""
+    """Run Tavern tests using tavern-ci command with environment setup"""
     if not test_files:
         print("❌ No test files found")
         return False
     
     print(f"🚀 Running {len(test_files)} test file(s)...")
     
+    # Prepare environment
+    prepare_test_environment()
+    
     all_passed = True
-    for test_file in test_files:
-        print(f"\n📋 Running {test_file.name}...")
-        
-        # Try tavern-ci first, then fallback to python -m tavern variants
-        cmd = ['tavern-ci', str(test_file)]
-        if not verbose:
-            cmd.extend(['-q'])
-        
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=Path(__file__).parent,
-                capture_output=not verbose,
-                text=True
-            )
+    temp_files = []
+    
+    try:
+        for test_file in test_files:
+            print(f"\n📋 Running {test_file.name}...")
             
-            if result.returncode == 0:
-                print(f"   ✅ {test_file.name} - PASSED")
-            else:
-                print(f"   ❌ {test_file.name} - FAILED")
-                if not verbose and result.stderr:
-                    print(f"      Error: {result.stderr.strip()}")
-                all_passed = False
+            # Create temp file with substitutions
+            temp_file = create_temp_test_file(test_file)
+            temp_files.append(temp_file)
+            
+            # Try tavern-ci command
+            cmd = ['tavern-ci', str(temp_file)]
+            if not verbose:
+                cmd.extend(['-q'])
+            
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=Path(__file__).parent,
+                    capture_output=not verbose,
+                    text=True
+                )
                 
-        except FileNotFoundError:
-            # Try multiple fallbacks
-            fallback_commands = [
-                ['python', '-m', 'tavern', str(test_file)],
-                ['python', '-m', 'tavern.cli', str(test_file)]
-            ]
-            
-            fallback_success = False
-            for fallback_cmd in fallback_commands:
-                try:
-                    result = subprocess.run(
-                        fallback_cmd,
-                        cwd=Path(__file__).parent,
-                        capture_output=not verbose,
-                        text=True
-                    )
+                if result.returncode == 0:
+                    print(f"   ✅ {test_file.name} - PASSED")
+                else:
+                    print(f"   ❌ {test_file.name} - FAILED")
+                    if not verbose and result.stderr:
+                        print(f"      Error: {result.stderr.strip()}")
+                    if not verbose and result.stdout:
+                        print(f"      Output: {result.stdout.strip()}")
+                    all_passed = False
                     
-                    if result.returncode == 0:
-                        print(f"   ✅ {test_file.name} - PASSED (fallback: {' '.join(fallback_cmd[:3])})")
-                        fallback_success = True
-                        break
-                    else:
-                        continue  # Try next fallback
-                        
-                except Exception:
-                    continue  # Try next fallback
-            
-            if not fallback_success:
-                print(f"   ❌ {test_file.name} - FAILED (all commands failed)")
+            except FileNotFoundError:
+                print(f"   ❌ {test_file.name} - FAILED (tavern-ci not found)")
                 all_passed = False
-                
-        except Exception as e:
-            print(f"   ❌ Error running {test_file.name}: {e}")
-            all_passed = False
+            except Exception as e:
+                print(f"   ❌ Error running {test_file.name}: {e}")
+                all_passed = False
+    
+    finally:
+        # Cleanup temp files
+        for temp_file in temp_files:
+            if temp_file.exists():
+                temp_file.unlink()
     
     return all_passed
 
