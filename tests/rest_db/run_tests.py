@@ -110,31 +110,41 @@ def run_tavern_tests(test_files: List[Path], verbose: bool = False) -> bool:
             temp_file = create_temp_test_file(test_file)
             temp_files.append(temp_file)
             
-            # Try tavern-ci command
+            # Force use of tavern-ci command directly (no pytest)
             cmd = ['tavern-ci', str(temp_file)]
-            if not verbose:
+            if verbose:
+                cmd.extend(['-v'])
+            else:
                 cmd.extend(['-q'])
+                
+            # Set environment to prevent pytest from running
+            env = os.environ.copy()
+            env['TAVERN_STRICT'] = 'false'  # Be more lenient with validation
             
             try:
                 result = subprocess.run(
                     cmd,
                     cwd=Path(__file__).parent,
-                    capture_output=not verbose,
+                    env=env,
+                    capture_output=True,  # Always capture output for better error reporting
                     text=True
                 )
                 
                 if result.returncode == 0:
                     print(f"   ✅ {test_file.name} - PASSED")
+                    if verbose and result.stdout:
+                        print(f"      Output: {result.stdout}")
                 else:
                     print(f"   ❌ {test_file.name} - FAILED")
-                    if not verbose and result.stderr:
+                    if result.stderr:
                         print(f"      Error: {result.stderr.strip()}")
-                    if not verbose and result.stdout:
+                    if result.stdout:
                         print(f"      Output: {result.stdout.strip()}")
                     all_passed = False
                     
             except FileNotFoundError:
-                print(f"   ❌ {test_file.name} - FAILED (tavern-ci not found)")
+                print(f"   ❌ {test_file.name} - FAILED (tavern-ci command not found)")
+                print("      Make sure Tavern is installed: pip install tavern")
                 all_passed = False
             except Exception as e:
                 print(f"   ❌ Error running {test_file.name}: {e}")

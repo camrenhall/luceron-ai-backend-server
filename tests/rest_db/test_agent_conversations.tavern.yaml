@@ -1,27 +1,28 @@
 ---
 # Agent Conversations CRUD Tests
 test_name: Agent Conversations - Full CRUD Cycle
-includes:
-  - !include config.yaml
+# Variables are injected by run_tests.py
 marks:
   - crud
   - agent
 stages:
   - name: Get OAuth Token
     request:
-      url: "{api_base_url}/oauth/token"
+      url: "{api_base_url}/oauth2/token"
       method: POST
       headers:
         content-type: application/x-www-form-urlencoded
       data:
         grant_type: client_credentials
-        client_id: "{oauth_service_id}"
         client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
         client_assertion: "{jwt_token}"
     response:
       status_code: 200
       json:
         access_token: !anystr
+        token_type: Bearer
+        expires_in: !anyint
+        scope: !anystr
       save:
         json:
           oauth_token: access_token
