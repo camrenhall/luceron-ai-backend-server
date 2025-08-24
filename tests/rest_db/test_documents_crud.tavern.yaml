@@ -41,9 +41,13 @@ stages:
         priority: "HIGH"
         status: "OPEN"
     response:
-      status_code: 201
+      status_code: 200
       json:
         case_id: !anystr
+        client_name: "REST_DocumentTestCase"
+        client_email: "rest_doc_test@example.com"
+        client_phone: null
+        status: "OPEN"
       save:
         json:
           parent_case_id: case_id

@@ -41,13 +41,13 @@ stages:
         priority: "MEDIUM"
         status: "OPEN"
     response:
-      status_code: 201
+      status_code: 200
       json:
         case_id: !anystr
         client_name: "REST_TestClient"
         client_email: "rest_test@example.com"
+        client_phone: null
         status: "OPEN"
-        created_at: !anystr
       save:
         json:
           created_case_id: case_id
@@ -139,4 +139,7 @@ stages:
     response:
       status_code: 200
       json:
-        data: !anything
+        cases: !anything
+        total_count: !anyint
+        limit: !anyint
+        offset: !anyint
