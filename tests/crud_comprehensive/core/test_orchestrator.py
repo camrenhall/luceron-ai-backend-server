@@ -19,6 +19,14 @@ from config import get_config
 
 
 @dataclass
+class ValidationResult:
+    """Backward compatibility for database validation results"""
+    valid: bool
+    errors: List[str]
+    warnings: List[str]
+
+
+@dataclass
 class TestResult:
     """Simple test result container"""
     operation: str
@@ -370,9 +378,13 @@ class APITestOrchestrator:
         }
     
     # Backward compatibility methods for legacy tests
-    async def validate_database_state(self, table: str, uuid_field: str, uuid_value: str, operation: str) -> dict:
+    async def validate_database_state(self, table: str, uuid_field: str, uuid_value: str, operation: str) -> ValidationResult:
         """Backward compatibility - API-only testing doesn't validate database state"""
-        return {"valid": True, "errors": [], "warnings": ["API-only testing - database validation skipped"]}
+        return ValidationResult(
+            valid=True, 
+            errors=[], 
+            warnings=["API-only testing - database validation skipped"]
+        )
 
 
 # Backward compatibility alias
