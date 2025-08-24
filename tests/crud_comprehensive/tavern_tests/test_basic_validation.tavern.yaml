@@ -1,0 +1,45 @@
+---
+# Basic Tavern Test - Framework validation without OAuth
+test_name: Basic Framework Validation Test
+includes:
+  - !include tavern_config_simple.yaml
+marks:
+  - smoke
+  - validation
+stages:
+  - name: Test HTTP GET Request
+    request:
+      url: "https://httpbin.org/get"
+      method: GET
+      params:
+        framework: "tavern"
+        test: "validation"
+    response:
+      status_code: 200
+      json:
+        args:
+          framework: "tavern"
+          test: "validation"
+        url: "https://httpbin.org/get?framework=tavern&test=validation"
+
+---
+test_name: Test JSON POST Request
+includes:
+  - !include tavern_config_simple.yaml
+marks:
+  - smoke
+stages:
+  - name: Test HTTP POST with JSON
+    request:
+      url: "https://httpbin.org/post"
+      method: POST
+      json:
+        test_data: "tavern_validation"
+        timestamp: 1234567890
+    response:
+      status_code: 200
+      json:
+        json:
+          test_data: "tavern_validation"
+          timestamp: 1234567890
+        url: "https://httpbin.org/post"

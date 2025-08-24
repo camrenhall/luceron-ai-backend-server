@@ -1,0 +1,132 @@
+---
+# Documents CRUD Tests - With Case Dependencies
+test_name: Documents - Full CRUD Cycle
+includes:
+  - !include config.yaml
+marks:
+  - crud
+  - documents
+stages:
+  - name: Get OAuth Token
+    request:
+      url: "{api_base_url}/oauth/token"
+      method: POST
+      headers:
+        content-type: application/x-www-form-urlencoded
+      data:
+        grant_type: client_credentials
+        client_id: "{oauth_service_id}"
+        client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+        client_assertion: !function "auth_helpers:generate_jwt_token"
+    response:
+      status_code: 200
+      json:
+        access_token: !anystr
+      save:
+        json:
+          oauth_token: access_token
+
+  - name: Create Parent Case
+    request:
+      url: "{api_base_url}/api/cases"
+      method: POST
+      headers:
+        authorization: "Bearer {oauth_token}"
+        content-type: application/json
+      json:
+        client_name: "REST_DocumentTestCase"
+        client_email: "rest_doc_test@example.com"
+        case_type: "DOCUMENT_REVIEW"
+        priority: "HIGH"
+        status: "OPEN"
+    response:
+      status_code: 201
+      json:
+        case_id: !anystr
+      save:
+        json:
+          parent_case_id: case_id
+
+  - name: Create Document
+    request:
+      url: "{api_base_url}/api/documents"
+      method: POST
+      headers:
+        authorization: "Bearer {oauth_token}"
+        content-type: application/json
+      json:
+        case_id: "{parent_case_id}"
+        file_name: "REST_TestDocument.pdf"
+        file_type: "PDF"
+        file_size: 2048
+        content_hash: "rest_test_hash_123"
+        is_analyzed: false
+    response:
+      status_code: 201
+      json:
+        document_id: !anystr
+        case_id: "{parent_case_id}"
+        file_name: "REST_TestDocument.pdf"
+        file_type: "PDF"
+        is_analyzed: false
+        created_at: !anystr
+      save:
+        json:
+          created_document_id: document_id
+
+  - name: Read Created Document
+    request:
+      url: "{api_base_url}/api/documents/{created_document_id}"
+      method: GET
+      headers:
+        authorization: "Bearer {oauth_token}"
+    response:
+      status_code: 200
+      json:
+        document_id: "{created_document_id}"
+        case_id: "{parent_case_id}"
+        file_name: "REST_TestDocument.pdf"
+        is_analyzed: false
+
+  - name: Update Document Analysis Status
+    request:
+      url: "{api_base_url}/api/documents/{created_document_id}"
+      method: PUT
+      headers:
+        authorization: "Bearer {oauth_token}"
+        content-type: application/json
+      json:
+        is_analyzed: true
+    response:
+      status_code: 200
+      json:
+        document_id: "{created_document_id}"
+        is_analyzed: true
+        updated_at: !anystr
+
+  - name: Delete Document
+    request:
+      url: "{api_base_url}/api/documents/{created_document_id}"
+      method: DELETE
+      headers:
+        authorization: "Bearer {oauth_token}"
+    response:
+      status_code: 204
+
+  - name: Verify Document Deletion
+    request:
+      url: "{api_base_url}/api/documents/{created_document_id}"
+      method: GET
+      headers:
+        authorization: "Bearer {oauth_token}"
+    response:
+      status_code: 404
+
+  - name: Cleanup Parent Case
+    request:
+      url: "{api_base_url}/api/cases/{parent_case_id}"
+      method: DELETE
+      headers:
+        authorization: "Bearer {oauth_token}"
+    response:
+      status_code: 204

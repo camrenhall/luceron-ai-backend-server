@@ -1,0 +1,43 @@
+---
+# Standalone Tavern Test - No configuration dependencies
+test_name: Standalone Framework Test
+marks:
+  - smoke
+stages:
+  - name: Test Simple GET Request
+    request:
+      url: "https://httpbin.org/get"
+      method: GET
+    response:
+      status_code: 200
+      json:
+        args: !anything
+        headers: !anything
+        origin: !anystr
+        url: "https://httpbin.org/get"
+
+---
+test_name: Test POST Request
+marks:
+  - smoke
+stages:
+  - name: Test Simple POST Request
+    request:
+      url: "https://httpbin.org/post"
+      method: POST
+      json:
+        message: "Hello from Tavern"
+        test: true
+    response:
+      status_code: 200
+      json:
+        args: !anything
+        data: !anything
+        files: !anything
+        form: !anything
+        headers: !anything
+        json:
+          message: "Hello from Tavern"
+          test: true
+        origin: !anystr
+        url: "https://httpbin.org/post"

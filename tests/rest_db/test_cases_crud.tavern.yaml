@@ -1,0 +1,140 @@
+---
+# Cases CRUD Tests - Complete API Testing
+test_name: Cases - Full CRUD Cycle
+includes:
+  - !include config.yaml
+marks:
+  - crud
+  - cases
+stages:
+  - name: Get OAuth Token
+    request:
+      url: "{api_base_url}/oauth/token"
+      method: POST
+      headers:
+        content-type: application/x-www-form-urlencoded
+      data:
+        grant_type: client_credentials
+        client_id: "{oauth_service_id}"
+        client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+        client_assertion: !function "auth_helpers:generate_jwt_token"
+    response:
+      status_code: 200
+      json:
+        access_token: !anystr
+      save:
+        json:
+          oauth_token: access_token
+
+  - name: Create Case
+    request:
+      url: "{api_base_url}/api/cases"
+      method: POST
+      headers:
+        authorization: "Bearer {oauth_token}"
+        content-type: application/json
+      json:
+        client_name: "REST_TestClient"
+        client_email: "rest_test@example.com"
+        case_type: "GENERAL_INQUIRY"
+        priority: "MEDIUM"
+        status: "OPEN"
+    response:
+      status_code: 201
+      json:
+        case_id: !anystr
+        client_name: "REST_TestClient"
+        client_email: "rest_test@example.com"
+        status: "OPEN"
+        created_at: !anystr
+      save:
+        json:
+          created_case_id: case_id
+
+  - name: Read Created Case
+    request:
+      url: "{api_base_url}/api/cases/{created_case_id}"
+      method: GET
+      headers:
+        authorization: "Bearer {oauth_token}"
+    response:
+      status_code: 200
+      json:
+        case_id: "{created_case_id}"
+        client_name: "REST_TestClient"
+        status: "OPEN"
+
+  - name: Update Case Status
+    request:
+      url: "{api_base_url}/api/cases/{created_case_id}"
+      method: PUT
+      headers:
+        authorization: "Bearer {oauth_token}"
+        content-type: application/json
+      json:
+        status: "CLOSED"
+    response:
+      status_code: 200
+      json:
+        case_id: "{created_case_id}"
+        status: "CLOSED"
+        updated_at: !anystr
+
+  - name: Delete Case
+    request:
+      url: "{api_base_url}/api/cases/{created_case_id}"
+      method: DELETE
+      headers:
+        authorization: "Bearer {oauth_token}"
+    response:
+      status_code: 204
+
+  - name: Verify Deletion
+    request:
+      url: "{api_base_url}/api/cases/{created_case_id}"
+      method: GET
+      headers:
+        authorization: "Bearer {oauth_token}"
+    response:
+      status_code: 404
+
+---
+test_name: Cases - List Operation
+includes:
+  - !include config.yaml
+marks:
+  - crud
+  - cases
+  - list
+stages:
+  - name: Get OAuth Token
+    request:
+      url: "{api_base_url}/oauth/token"
+      method: POST
+      headers:
+        content-type: application/x-www-form-urlencoded
+      data:
+        grant_type: client_credentials
+        client_id: "{oauth_service_id}"
+        client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+        client_assertion: !function "auth_helpers:generate_jwt_token"
+    response:
+      status_code: 200
+      json:
+        access_token: !anystr
+      save:
+        json:
+          oauth_token: access_token
+
+  - name: List Cases
+    request:
+      url: "{api_base_url}/api/cases"
+      method: GET
+      headers:
+        authorization: "Bearer {oauth_token}"
+      params:
+        limit: 10
+    response:
+      status_code: 200
+      json:
+        data: !anything

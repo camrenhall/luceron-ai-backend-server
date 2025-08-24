@@ -1,0 +1,23 @@
+---
+# Simple Tavern Test - Just to validate framework setup
+# This test doesn't require OAuth authentication
+
+test_name: Simple HTTP Test - No OAuth
+marks:
+  - smoke
+  - validation
+stages:
+  - name: Test Basic HTTP Request
+    request:
+      url: "https://httpbin.org/get"
+      method: GET
+      params:
+        test: "tavern_validation"
+    response:
+      status_code: 200
+      json:
+        args:
+          test: "tavern_validation"
+        headers: !anything
+        origin: !anystr
+        url: "https://httpbin.org/get?test=tavern_validation"

@@ -11,43 +11,79 @@ pip install -r requirements.txt
 ```
 
 ### 2. Configuration
-Create a `.env` file with your credentials (DATABASE_URL is pre-configured with Supabase pooler):
+Set environment variables for testing your local container:
 ```bash
-# Optional: Override default database URL
-# DATABASE_URL=postgresql://postgres.bjooglksafuxdeknpaso:SgUHEBQv5vdWG0pF@aws-0-us-east-2.pooler.supabase.com:6543/postgres
-
-# Required: OAuth credentials
-OAUTH_SERVICE_ID=camren_master
-OAUTH_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
+# Required: OAuth credentials (same as original Python tests)
+export OAUTH_SERVICE_ID="qa_comprehensive_test_service"
+export TEST_OAUTH_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
 your_private_key_here
 -----END PRIVATE KEY-----"
 
-# Optional: Override API base URL
-# AGENT_DB_BASE_URL=https://luceron-ai-backend-server-909342873358.us-central1.run.app
+# Optional: API base URL (defaults to localhost:8080 for local container)
+export AGENT_DB_BASE_URL="http://localhost:8080"
+
+# Optional: Performance thresholds
+export CREATE_THRESHOLD="3.0"
+export READ_THRESHOLD="2.0"
+```
+
+**For CI/CD Integration:**
+```bash
+# Point to deployed service instead of localhost
+export AGENT_DB_BASE_URL="https://your-deployed-api.com"
 ```
 
 ### 3. Run Tests
 
-**Quick validation:**
+**🚀 TAVERN TESTS (Default - Replaces Python tests):**
 ```bash
+# Run all integration tests (equivalent to python run_tests.py)
+python run_tavern_tests.py
+
+# Run specific test suite
+python run_tavern_tests.py --pattern cases      # Cases CRUD
+python run_tavern_tests.py --pattern documents  # Documents CRUD
+python run_tavern_tests.py --pattern agent      # Agent tests
+
+# Verbose output for debugging
+python run_tavern_tests.py --verbose
+
+# List available test files
+python run_tavern_tests.py --list-tests
+
+# Direct pytest execution
+pytest tavern_tests/ -v --no-cov
+```
+
+**📚 Original Python Tests (Available for comparison):**
+```bash
+# Legacy Python implementation
 python run_tests.py
+pytest suites/ integration/ -v
 ```
 
-**Full test suite:**
-```bash
-pytest -v
-```
-
-**Specific test categories:**
-```bash
-pytest suites/test_cases_crud.py -v          # Cases CRUD
-pytest suites/test_documents_crud.py -v      # Documents CRUD  
-pytest integration/ -v                       # Cross-table tests
-```
+**🔄 Migration Status:**
+- ✅ **Tavern tests** - Lightweight YAML-based, ready for CI/CD
+- 📦 **Python tests** - Original implementation, more complex but fully featured
 
 ## Architecture
 
-### Dual-Layer Validation
+### 🆕 Tavern-Based Testing (MVP Focus)
+```
+YAML Test Definition → Tavern Engine → API Validation
+         ↓                    ↓              ↓
+   Declarative Tests    HTTP Requests    Response Validation
+   Static Test Data     OAuth Tokens     Status Code Checks
+   Clear Test Stages    JSON Payloads    Field Validation
+```
+
+**Key Components:**
+- **tavern_config.yaml** - Global configuration and environment variables
+- **tavern_helpers.py** - OAuth token generation and utility functions
+- **Static Test Data** - Predictable, maintainable test scenarios
+- **YAML Test Files** - Declarative test definitions
+
+### Legacy Python Testing (Advanced)
 ```
 REST API Test → Database Validation
       ↓                    ↓
@@ -56,8 +92,7 @@ REST API Test → Database Validation
    Data Correct      Constraints Met
 ```
 
-### Core Components
-
+**Core Components:**
 - **TestOrchestrator** - Central coordination and timing
 - **RestClient** - OAuth-authenticated HTTP client  
 - **DatabaseValidator** - Direct Supabase connectivity

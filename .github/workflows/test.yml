@@ -1,4 +1,4 @@
-name: CRUD Comprehensive Tests
+name: REST API Database Tests
 
 on:
   push:
@@ -79,32 +79,26 @@ jobs:
         echo "Final container logs:"
         docker logs test-api
     
-    - name: Run smoke tests (API Only)
+    - name: Run smoke tests (Tavern API Tests)
       env:
         # Test API endpoint (containerized application)
-        TEST_API_BASE_URL: "http://localhost:8080"
+        AGENT_DB_BASE_URL: "http://localhost:8080"
         
         # OAuth Configuration  
         TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
         
-        # Concurrency Control
-        MAX_CONCURRENT_TESTS: "5"
-        
       run: |
-        cd tests/crud_comprehensive
+        cd tests/rest_db
         pip install -r requirements.txt
         
+        # Verify setup before running tests
+        python verify_setup.py
         
-        python runners/unified_runner.py --mode smoke --db-mode qa --output json --verbose || {
-          echo "Tests failed, showing detailed pytest output:"
-          if [ -f test-results.json ]; then
-            echo "=== PYTEST RESULTS JSON ==="
-            cat test-results.json
-          else
-            echo "No test results file found"
-          fi
+        # Run Tavern API tests
+        python run_tests.py --verbose || {
+          echo "Tavern tests failed!"
           exit 1
         }
     
@@ -119,7 +113,7 @@ jobs:
       if: always()
       with:
         name: smoke-test-results
-        path: tests/crud_comprehensive/test-results.*
+        path: tests/rest_db/*.log
 
   regression-tests:
     name: Full Regression Tests
@@ -162,23 +156,22 @@ jobs:
         # Wait for API to be ready
         timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
     
-    - name: Run regression tests (API Only)
+    - name: Run regression tests (Tavern API Tests)
       env:
         # Test API endpoint (containerized application)
-        TEST_API_BASE_URL: "http://localhost:8080"
+        AGENT_DB_BASE_URL: "http://localhost:8080"
         
         # OAuth Configuration
         TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
         
-        # Concurrency Control
-        MAX_CONCURRENT_TESTS: "5"
-        
       run: |
-        cd tests/crud_comprehensive
+        cd tests/rest_db
         pip install -r requirements.txt
-        python runners/unified_runner.py --mode regression --db-mode qa --coverage --parallel --workers 2 --output json --verbose
+        
+        # Run all Tavern API tests
+        python run_tests.py --verbose
     
     - name: Cleanup test containers
       if: always()
@@ -191,9 +184,7 @@ jobs:
       if: always()
       with:
         name: regression-test-results
-        path: |
-          tests/crud_comprehensive/test-results.*
-          tests/crud_comprehensive/coverage.xml
+        path: tests/rest_db/*.log
 
   parallel-full-suite:
     name: Parallel Full Suite (PR Only)
@@ -235,23 +226,22 @@ jobs:
         # Wait for API to be ready
         timeout 60s bash -c 'until curl -f http://localhost:8080/; do sleep 2; done'
     
-    - name: Run parallel tests (API Only)
+    - name: Run parallel tests (Tavern API Tests)
       env:
         # Test API endpoint (containerized application)
-        TEST_API_BASE_URL: "http://localhost:8080"
+        AGENT_DB_BASE_URL: "http://localhost:8080"
         
         # OAuth Configuration
         TEST_OAUTH_PRIVATE_KEY: ${{ secrets.TEST_OAUTH_PRIVATE_KEY }}
         OAUTH_SERVICE_ID: "qa_comprehensive_test_service"
         OAUTH_AUDIENCE: "luceron-auth-server"
         
-        # Concurrency Control
-        MAX_CONCURRENT_TESTS: "5"
-        
       run: |
-        cd tests/crud_comprehensive
+        cd tests/rest_db
         pip install -r requirements.txt
-        python runners/unified_runner.py --mode full --db-mode qa --coverage --parallel --workers auto --output json
+        
+        # Run all Tavern API tests
+        python run_tests.py --verbose
     
     - name: Cleanup test containers
       if: always()
@@ -264,6 +254,4 @@ jobs:
       if: always()
       with:
         name: parallel-test-results
-        path: |
-          tests/crud_comprehensive/test-results.*
-          tests/crud_comprehensive/coverage.xml
+        path: tests/rest_db/*.log
