@@ -69,7 +69,8 @@ stages:
         original_file_name: "REST_TestDocument.pdf"
         original_file_size: 2048
         original_file_type: "PDF"
-        original_s3_location: "test/documents/REST_TestDocument.pdf"
+        original_s3_location: "s3://test-bucket/documents/"
+        original_s3_key: "documents/test-case/REST_TestDocument.pdf"
     response:
       status_code: 200
       json:
@@ -83,7 +84,8 @@ stages:
         original_file_name: "REST_TestDocument.pdf"
         original_file_size: 2048
         original_file_type: "PDF"
-        original_s3_location: "test/documents/REST_TestDocument.pdf"
+        original_s3_location: "s3://test-bucket/documents/"
+        original_s3_key: "documents/test-case/REST_TestDocument.pdf"
         created_at: !anystr
       save:
         json:
