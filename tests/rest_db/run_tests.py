@@ -57,6 +57,7 @@ def run_tavern_tests(test_files: List[Path], verbose: bool = False) -> bool:
     for test_file in test_files:
         print(f"\n📋 Running {test_file.name}...")
         
+        # Try tavern-ci first, then fallback to python -m tavern variants
         cmd = ['tavern-ci', str(test_file)]
         if not verbose:
             cmd.extend(['-q'])
@@ -78,8 +79,36 @@ def run_tavern_tests(test_files: List[Path], verbose: bool = False) -> bool:
                 all_passed = False
                 
         except FileNotFoundError:
-            print("   ❌ tavern-ci command not found. Install tavern: pip install tavern")
-            return False
+            # Try multiple fallbacks
+            fallback_commands = [
+                ['python', '-m', 'tavern', str(test_file)],
+                ['python', '-m', 'tavern.cli', str(test_file)]
+            ]
+            
+            fallback_success = False
+            for fallback_cmd in fallback_commands:
+                try:
+                    result = subprocess.run(
+                        fallback_cmd,
+                        cwd=Path(__file__).parent,
+                        capture_output=not verbose,
+                        text=True
+                    )
+                    
+                    if result.returncode == 0:
+                        print(f"   ✅ {test_file.name} - PASSED (fallback: {' '.join(fallback_cmd[:3])})")
+                        fallback_success = True
+                        break
+                    else:
+                        continue  # Try next fallback
+                        
+                except Exception:
+                    continue  # Try next fallback
+            
+            if not fallback_success:
+                print(f"   ❌ {test_file.name} - FAILED (all commands failed)")
+                all_passed = False
+                
         except Exception as e:
             print(f"   ❌ Error running {test_file.name}: {e}")
             all_passed = False
