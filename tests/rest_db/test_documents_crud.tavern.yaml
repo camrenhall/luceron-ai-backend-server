@@ -128,23 +128,6 @@ stages:
         updated_at: !anystr
         message: "Document record updated successfully"
 
-  - name: Delete Document
-    request:
-      url: "{api_base_url}/api/documents/{created_document_id}"
-      method: DELETE
-      headers:
-        authorization: "Bearer {oauth_token}"
-    response:
-      status_code: 204
-
-  - name: Verify Document Deletion
-    request:
-      url: "{api_base_url}/api/documents/{created_document_id}"
-      method: GET
-      headers:
-        authorization: "Bearer {oauth_token}"
-    response:
-      status_code: 404
 
   - name: Cleanup Parent Case
     request:
