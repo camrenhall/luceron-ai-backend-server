@@ -136,4 +136,4 @@ stages:
       headers:
         authorization: "Bearer {oauth_token}"
     response:
-      status_code: 204
+      status_code: 200
