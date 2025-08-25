@@ -97,9 +97,19 @@ stages:
         document_id: "{created_document_id}"
         case_id: "{parent_case_id}"
         original_file_name: "REST_TestDocument.pdf"
+        original_file_size: 2048
+        original_file_type: "PDF"
+        original_s3_location: "s3://test-bucket/documents/"
+        original_s3_key: "documents/test-case/REST_TestDocument.pdf"
         status: "PENDING"
+        created_at: !anystr
+        processed_file_name: null
+        processed_file_size: null
+        processed_s3_location: null
+        processed_s3_key: null
+        batch_id: null
 
-  - name: Update Document Analysis Status
+  - name: Update Document Status
     request:
       url: "{api_base_url}/api/documents/{created_document_id}"
       method: PUT
@@ -107,12 +117,12 @@ stages:
         authorization: "Bearer {oauth_token}"
         content-type: application/json
       json:
-        is_analyzed: true
+        status: "COMPLETED"
     response:
       status_code: 200
       json:
         document_id: "{created_document_id}"
-        is_analyzed: true
+        status: "COMPLETED"
         updated_at: !anystr
 
   - name: Delete Document
