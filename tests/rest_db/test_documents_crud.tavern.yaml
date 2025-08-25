@@ -121,9 +121,12 @@ stages:
     response:
       status_code: 200
       json:
+        success: true
         document_id: "{created_document_id}"
+        updated_fields: ["status"]
         status: "COMPLETED"
         updated_at: !anystr
+        message: "Document record updated successfully"
 
   - name: Delete Document
     request:
