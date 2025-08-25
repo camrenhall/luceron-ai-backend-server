@@ -107,10 +107,3 @@ jobs:
       run: |
         docker stop test-api || true
         docker rm test-api || true
-    
-    - name: Upload test results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: test-results
-        path: tests/rest_db/*.log
