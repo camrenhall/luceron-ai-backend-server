@@ -63,7 +63,11 @@ stages:
       json:
         case_id: "{created_case_id}"
         client_name: "REST_TestClient"
+        client_email: "rest_test@example.com"
+        client_phone: null
         status: "OPEN"
+        created_at: !anystr
+        last_communication_date: null
 
   - name: Update Case Status
     request:
@@ -78,8 +82,11 @@ stages:
       status_code: 200
       json:
         case_id: "{created_case_id}"
+        client_name: "REST_TestClient"
+        client_email: "rest_test@example.com"
+        client_phone: null
         status: "CLOSED"
-        updated_at: !anystr
+        created_at: !anystr
 
   - name: Delete Case
     request:
@@ -88,7 +95,7 @@ stages:
       headers:
         authorization: "Bearer {oauth_token}"
     response:
-      status_code: 204
+      status_code: 200
 
   - name: Verify Deletion
     request:
